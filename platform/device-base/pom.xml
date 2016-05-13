@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <properties>
+    <httpd.port.http.repo.core>7890</httpd.port.http.repo.core>
+    <httpd.address.http.repo.core>127.0.0.1</httpd.address.http.repo.core>
+
+    <tomcat.port.http.confluence>7880</tomcat.port.http.confluence>
+    <tomcat.port.shutdown.confluence>7879</tomcat.port.shutdown.confluence>
+    <tomcat.port.ajp.confluence>7878</tomcat.port.ajp.confluence>
+    <tomcat.port.jmxremote.confluence>7877</tomcat.port.jmxremote.confluence>
+
+    <tomcat.port.http.bamboo>7875</tomcat.port.http.bamboo>
+    <tomcat.port.shutdown.bamboo>7874</tomcat.port.shutdown.bamboo>
+    <tomcat.port.ajp.bamboo>7873</tomcat.port.ajp.bamboo>
+    <tomcat.port.jmxremote.bamboo>7872</tomcat.port.jmxremote.bamboo>
+	
+    <tomcat.port.http.nexus>7870</tomcat.port.http.nexus>
+    <tomcat.port.shutdown.nexus>7869</tomcat.port.shutdown.nexus>
+    <tomcat.port.ajp.nexus>7868</tomcat.port.ajp.nexus>
+    <tomcat.port.jmxremote.nexus>7867</tomcat.port.jmxremote.nexus>
+
+    <tomcat.port.http.jira>7865</tomcat.port.http.jira>
+    <tomcat.port.shutdown.jira>7864</tomcat.port.shutdown.jira>
+    <tomcat.port.ajp.jira>7863</tomcat.port.ajp.jira>
+    <tomcat.port.jmxremote.jira>7862</tomcat.port.jmxremote.jira>
+
+  </properties>
+
+  <artifactId>device-base</artifactId>
+  <groupId>zone.device.platform</groupId>
+  <version>1.0.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>Platform Base</name>
+  <description>Base POM for the device.zone platform configuration with constants.</description>
+
+  <scm>
+    <connection>scm:svn:https://github.com/minfrin/device.git/trunk/platform/device-base/</connection>
+    <developerConnection>scm:svn:https://github.com/minfrin/device.git/trunk/platform/device-base/</developerConnection>
+    <url>https://github.com/minfrin/device.git/trunk/platform/device-base/</url>
+  </scm>
+
+  <build>
+    <extensions>
+      <extension>
+        <groupId>org.apache.maven.wagon</groupId>
+        <artifactId>wagon-webdav</artifactId>
+        <version>1.0-beta-2</version>
+      </extension>
+    </extensions>
+  </build>
+
+  <distributionManagement>
+    <repository>
+      <id>repo.device.zone</id>
+      <name>Device Repository</name>
+      <url>dav:https://repo.device.zone/platform/maven2</url>
+    </repository>
+    <site>
+      <id>repo.device.zone</id>
+      <name>${project.name} Website</name>
+      <url>dav:https://repo.device.zone/platform/docs/${project.artifactId}/${project.version}/</url>
+    </site>
+  </distributionManagement>
+
+</project>

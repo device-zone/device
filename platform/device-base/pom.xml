@@ -34,7 +34,7 @@
 
   <artifactId>device-base</artifactId>
   <groupId>zone.device.platform</groupId>
-  <version>1.0.0</version>
+  <version>1.0.0-SNAPSHOT</version>
   <packaging>pom</packaging>
   <name>Device Project - Device Base</name>
   <description>Base POM for the device.zone platform configuration with constants. This parent POM provides common information such as port numbers for devices declared by the device project.</description>
@@ -75,9 +75,9 @@
   </issueManagement>
 
   <scm>
-    <connection>scm:svn:https://github.com/minfrin/device.git/tags/device-base-1.0.0</connection>
-    <developerConnection>scm:svn:https://github.com/minfrin/device.git/tags/device-base-1.0.0</developerConnection>
-    <url>https://github.com/minfrin/device/tree/master/platform/device-base/tags/device-base-1.0.0</url>
+    <connection>scm:svn:https://github.com/minfrin/device.git/trunk/platform/device-base/</connection>
+    <developerConnection>scm:svn:https://github.com/minfrin/device.git/trunk/platform/device-base/</developerConnection>
+    <url>https://github.com/minfrin/device/tree/master/platform/device-base</url>
   </scm>
 
   <build>

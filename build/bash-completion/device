@@ -1,0 +1,2 @@
+complete -C device device
+

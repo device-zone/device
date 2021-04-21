@@ -1,0 +1,46 @@
+# RPM Spec file for device
+
+Name:      @PACKAGE_NAME@
+Version:   @PACKAGE_VERSION@
+Release:   1%{?dist}
+Summary:   The device shell
+License:   ASL 2.0
+Group:     Applications/System
+Source:    https://github.com/minfrin/%{name}/releases/download/%{name}-%{version}/%{name}-%{version}.tar.bz2
+URL:       https://github.com/minfrin/%{name}
+Requires(pre): shadow-utils
+BuildRequires: gcc, autoconf, automake, libtool, editline-devel
+
+%define    __libtoolize /bin/true
+
+%description
+The device shell, allowing configuration of a system declaratively
+from the command line.
+
+%prep
+%setup -q
+rm -rf %{_builddir}/%{name}-%{version}/debian
+%build
+%configure --with-editline
+%make_build
+
+%install
+%make_install
+
+%pre
+getent group device >/dev/null || groupadd -r device
+
+%files
+%{_bindir}/device
+%{_mandir}/man1/device.1*
+%attr(2775,root,device) %{_sysconfdir}/device
+%attr(0775,root,root) %{_libexecdir}/device
+%{_datadir}/bash-completion/completions/device
+
+%doc AUTHORS ChangeLog README
+%license COPYING
+
+%changelog
+* Mon Apr 05 2021 Graham Leggett <minfrin@sharp.fm> 0.9.0-1
+- Initial release
+

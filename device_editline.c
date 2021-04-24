@@ -92,7 +92,7 @@ device_completion_hook(char *token, int *match)
 
             /* return a string that can be free()'d */
             if (strlen(token) <= strlen(current->name)) {
-                res = strdup(apr_pstrcat(pool, current->name + strlen(token), " ", NULL));
+                res = strdup(apr_pstrcat(pool, current->name + strlen(token), current->completion, NULL));
             }
 
         }
@@ -136,7 +136,8 @@ device_list_possible_hook(char *token, char ***av)
 
         if (current->type == DEVICE_PARSE_AMBIGUOUS) {
 
-            count = current->a.containers->nelts + current->a.commands->nelts + current->a.builtins->nelts;
+            count = current->a.containers->nelts + current->a.commands->nelts + current->a.builtins->nelts +
+                    current->a.keys->nelts + current->a.requires->nelts + current->a.values->nelts;
 
             *av = a = malloc(count * sizeof(char *));
 
@@ -161,6 +162,33 @@ device_list_possible_hook(char *token, char ***av)
             for (i = 0; i < current->a.builtins->nelts; i++)
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.builtins, i, const device_name_t);
+
+                /* return a string that can be free()'d */
+                a[j++] = strdup(name->name);
+
+            }
+
+            for (i = 0; i < current->a.keys->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
+
+                /* return a string that can be free()'d */
+                a[j++] = strdup(name->name);
+
+            }
+
+            for (i = 0; i < current->a.requires->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
+
+                /* return a string that can be free()'d */
+                a[j++] = strdup(name->name);
+
+            }
+
+            for (i = 0; i < current->a.values->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
 
                 /* return a string that can be free()'d */
                 a[j++] = strdup(name->name);

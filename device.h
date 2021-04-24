@@ -30,6 +30,8 @@
 #define DEVICE_HISTORY ".device_history"
 #define DEVICE_HISTORY_MAXLEN 1000
 
+#define DEVICE_MAX_PARAMETERS 1000
+
 typedef struct device_name_t {
     apr_size_t size;
     const char *name;
@@ -56,8 +58,14 @@ typedef struct device_builtin_t {
 } device_builtin_t;
 
 typedef struct device_parameter_t {
+    const char *key;
     const char *value;
+    apr_array_header_t *keys;
+    apr_array_header_t *requires;
+    apr_array_header_t *values;
     device_parse_t *command;
+    const char *error;
+    int required;
 } device_parameter_t;
 
 typedef struct device_command_t {
@@ -79,18 +87,23 @@ typedef struct device_ambiguous_t {
     apr_array_header_t *containers;
     apr_array_header_t *commands;
     apr_array_header_t *builtins;
+    apr_array_header_t *keys;
+    apr_array_header_t *requires;
+    apr_array_header_t *values;
 } device_ambiguous_t;
 
 typedef struct device_offset_t {
     unsigned int *offsets;
     unsigned int start;
     unsigned int end;
+    int equals;
     apr_size_t size;
 } device_offset_t;
 
 typedef struct device_parse_t {
     apr_pool_t *pool;
     const char *name;
+    const char *completion;
     device_parse_t *parent;
     device_offset_t *offset;
     device_type_e type;
@@ -153,10 +166,16 @@ typedef enum device_token_inside_e {
     DEVICE_TOKEN_INSIDE,
 } device_token_inside_e;
 
+typedef enum device_token_equals_e {
+    DEVICE_TOKEN_NOTSEEN = 0,
+    DEVICE_TOKEN_SEEN,
+} device_token_equals_e;
+
 typedef struct device_tokenize_state_t {
     device_token_escape_e escaped:5;
     device_token_quoted_e isquoted:2;
     device_token_inside_e intoken:1;
+    device_token_equals_e equals:1;
 } device_tokenize_state_t;
 
 apr_status_t device_tokenize_to_argv(const char *arg_str, const char ***argv_out,

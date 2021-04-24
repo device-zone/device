@@ -81,6 +81,30 @@ int device_compgen(device_t *d, const char *context)
             }
 #endif
 
+            for (i = 0; i < current->a.keys->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
+
+                apr_file_printf(d->out, "%s\n", name->name);
+
+            }
+
+            for (i = 0; i < current->a.requires->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
+
+                apr_file_printf(d->out, "%s\n", name->name);
+
+            }
+
+            for (i = 0; i < current->a.values->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
+
+                apr_file_printf(d->out, "%s\n", name->name);
+
+            }
+
         }
         else if (current->name) {
 

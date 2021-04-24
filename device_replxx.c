@@ -85,8 +85,8 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.containers, i, const device_name_t);
 
-                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
-//                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, " ", NULL), REPLXX_COLOR_BLUE);
+//                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
+                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, " ", NULL), REPLXX_COLOR_BLUE);
 
             }
 
@@ -94,8 +94,8 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.commands, i, const device_name_t);
 
-                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
-//                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, " ", NULL), REPLXX_COLOR_BRIGHTBLUE);
+//                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
+                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, " ", NULL), REPLXX_COLOR_BRIGHTBLUE);
 
             }
 
@@ -103,15 +103,42 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.builtins, i, const device_name_t);
 
-                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
-//                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, " ", NULL), REPLXX_COLOR_CYAN);
+//                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
+                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, " ", NULL), REPLXX_COLOR_CYAN);
+
+            }
+
+            for (i = 0; i < current->a.keys->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
+
+//                replxx_add_completion(lc, apr_pstrcat(pool, name->name, "=", NULL));
+                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, "=", NULL), REPLXX_COLOR_MAGENTA);
+
+            }
+
+            for (i = 0; i < current->a.requires->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
+
+//                replxx_add_completion(lc, apr_pstrcat(pool, name->name, "=", NULL));
+                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, "=", NULL), REPLXX_COLOR_BRIGHTMAGENTA);
+
+            }
+
+            for (i = 0; i < current->a.values->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
+
+//                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
+                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, " ", NULL), REPLXX_COLOR_MAGENTA);
 
             }
 
         }
         else {
 
-            replxx_add_completion(lc, apr_pstrcat(pool, current->name, " ", NULL));
+            replxx_add_completion(lc, apr_pstrcat(pool, current->name, current->completion, NULL));
 
         }
 
@@ -122,21 +149,6 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
     }
 
     apr_pool_clear(d->tpool);
-
-//        char** examples = (char**)( ud );
-//        size_t i;
-
-//        int utf8ContextLen = context_len( context );
-//        int prefixLen = (int)strlen( context ) - utf8ContextLen;
-//        *contextLen = utf8str_codepoint_len( context + prefixLen, utf8ContextLen );
-//        for (i = 0;     examples[i] != NULL; ++i) {
-//                if (strncmp(context + prefixLen, examples[i], utf8ContextLen) == 0) {
-//                        replxx_add_completion(lc, examples[i]);
-//                }
-//        }
-
-//    replxx_add_completion(lc, "xfoo");
-//    replxx_add_completion(lc, "xbar");
 
 }
 
@@ -198,6 +210,17 @@ static void device_colour_hook(char const *context, ReplxxColor *colours, int si
                             break;
                         case DEVICE_PARSE_BUILTIN:
                             colours[utf8str_codepoint_len(context, *offset)] = REPLXX_COLOR_CYAN;
+                            break;
+                        case DEVICE_PARSE_PARAMETER:
+                            if (current->p.error) {
+                                colours[utf8str_codepoint_len(context, *offset)] = REPLXX_COLOR_BRIGHTRED;
+                            }
+                            else if (current->p.required) {
+                                colours[utf8str_codepoint_len(context, *offset)] = REPLXX_COLOR_BRIGHTGREEN;
+                            }
+                            else {
+                                colours[utf8str_codepoint_len(context, *offset)] = REPLXX_COLOR_GREEN;
+                            }
                             break;
                         default:
                             break;

@@ -145,9 +145,6 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
                     maxlen = len;
                 }
 
-//                replxx_add_color_completion(lc, name->name, REPLXX_COLOR_BRIGHTBLUE);
-//                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
-
             }
 
             for (i = 0; i < current->a.commands->nelts; i++)
@@ -161,9 +158,6 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
                 if (len > maxlen) {
                     maxlen = len;
                 }
-
-//                replxx_add_color_completion(lc, name->name, REPLXX_COLOR_BRIGHTBLUE);
-//                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
 
             }
 
@@ -179,8 +173,47 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
                     maxlen = len;
                 }
 
-//               replxx_add_color_completion(lc, name->name, REPLXX_COLOR_BRIGHTBLUE);
-//               replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
+            }
+
+            for (i = 0; i < current->a.keys->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
+
+                char **entry = apr_array_push(list);
+                *entry = apr_pstrcat(pool, "\033[35m", name->name, "\033[0m ", NULL);
+
+                len = strlen(name->name);
+                if (len > maxlen) {
+                    maxlen = len;
+                }
+
+            }
+
+            for (i = 0; i < current->a.requires->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
+
+                char **entry = apr_array_push(list);
+                *entry = apr_pstrcat(pool, "\033[1;35m", name->name, "\033[0m ", NULL);
+
+                len = strlen(name->name);
+                if (len > maxlen) {
+                    maxlen = len;
+                }
+
+            }
+
+            for (i = 0; i < current->a.values->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
+
+                char **entry = apr_array_push(list);
+                *entry = apr_pstrcat(pool, "\033[1;35m", name->name, "\033[0m ", NULL);
+
+                len = strlen(name->name);
+                if (len > maxlen) {
+                    maxlen = len;
+                }
 
             }
 
@@ -193,11 +226,9 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
 
             apr_size_t len = lf->cursor - lf->buffer;
 
-//            replxx_add_completion(lc, apr_pstrcat(pool, current->name, " ", NULL));
-
-            if (current->offset->start < len) {
+            if (current->offset && current->offset->start < len) {
                 el_deletestr(el, len - current->offset->start);
-                el_insertstr(el, apr_pstrcat(pool, current->name, " ", NULL));
+                el_insertstr(el, apr_pstrcat(pool, current->name, current->completion, NULL));
             }
 
             res = CC_REFRESH;

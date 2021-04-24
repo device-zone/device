@@ -62,7 +62,6 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.containers, i, const device_name_t);
 
-//                replxx_add_color_completion(lc, name->name, REPLXX_COLOR_BRIGHTBLUE);
                 linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, " ", NULL));
 
             }
@@ -71,7 +70,6 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.commands, i, const device_name_t);
 
-//                replxx_add_color_completion(lc, name->name, REPLXX_COLOR_BRIGHTBLUE);
                 linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, " ", NULL));
 
             }
@@ -80,7 +78,30 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.builtins, i, const device_name_t);
 
-//                replxx_add_color_completion(lc, name->name, REPLXX_COLOR_BRIGHTBLUE);
+                linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, " ", NULL));
+
+            }
+
+            for (i = 0; i < current->a.keys->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
+
+                linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, "=", NULL));
+
+            }
+
+            for (i = 0; i < current->a.requires->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
+
+                linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, "=", NULL));
+
+            }
+
+            for (i = 0; i < current->a.values->nelts; i++)
+            {
+                const device_name_t *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
+
                 linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, " ", NULL));
 
             }
@@ -88,7 +109,7 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
         }
         else {
 
-            linenoiseAddCompletion(lc, apr_pstrcat(pool, current->name, " ", NULL));
+            linenoiseAddCompletion(lc, apr_pstrcat(pool, current->name, current->completion, NULL));
 
         }
 

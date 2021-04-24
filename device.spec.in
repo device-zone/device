@@ -21,7 +21,7 @@ from the command line.
 %setup -q
 rm -rf %{_builddir}/%{name}-%{version}/debian
 %build
-%configure --with-editline
+%configure --with-editline --with-replxx
 %make_build
 
 %install

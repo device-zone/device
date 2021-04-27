@@ -180,8 +180,10 @@ apr_status_t device_tokenize_to_argv(const char *arg_str, const char ***argv_out
         (!(error = cp))        /* last line of macro... */
 
 
-    *state_out = states = apr_pcalloc(pool,
-            (strlen(arg_str) + 1) * sizeof(device_tokenize_state_t));
+    if (state_out) {
+        *state_out = states = apr_pcalloc(pool,
+                (strlen(arg_str) + 1) * sizeof(device_tokenize_state_t));
+    }
 
     memcpy(&st, state, sizeof(*state));
 
@@ -726,7 +728,9 @@ apr_status_t device_tokenize_to_argv(const char *arg_str, const char ***argv_out
                 break; \
             }; \
             if (convert) { \
-                memcpy(states++, state, sizeof(*state)); \
+                if (states) { \
+                    memcpy(states++, state, sizeof(*state)); \
+                } \
             } \
             if (skip || error) { \
                 break; \
@@ -1255,10 +1259,16 @@ device_parse_t *device_parameter_make(device_parse_t *dp,
     /* read the results */
     while (1) {
         char buf[HUGE_STRING_LEN];
+        char *val = buf + 1;
 
         if (APR_SUCCESS == (status = apr_file_gets(buf, sizeof(buf), proc->out))) {
 
             if (overflow > 0) {
+
+                const char **args;
+                device_offset_t *offsets;
+                const char *error;
+                device_tokenize_state_t state = { 0 };
 
                 int len = strlen(buf);
                 char mandatory = buf[0];
@@ -1275,31 +1285,47 @@ device_parse_t *device_parameter_make(device_parse_t *dp,
                 else if (!('-' == mandatory || '*' == mandatory)) {
                     continue;
                 }
+                else if (APR_SUCCESS
+                        != device_tokenize_to_argv(val, &args, &offsets,
+                                NULL, &state, &error, dp->pool)) {
+                    /* could not parse line, skip */
+                    continue;
+                }
+                else if (state.escaped) {
+                    /* half way through an escaped state, skip */
+                    continue;
+                }
+                else if (state.isquoted) {
+                    /* quotes are unclosed, skip */
+                    continue;
+                }
+                else if (!args[0] || args[1] || !offsets) {
+                    /* one argument and one argument only, otherwise skip */
+                    continue;
+                }
                 else {
 
-                    char *val = buf + 1;
-                    char *equals = strchr(val, '=');
 
                     len--;
 
                     if (dp->p.key) {
-                        if (equals) {
+                        if (offsets->equals > -1) {
 
                             apr_size_t size = strlen(dp->p.key);
 
-                            if (!strncmp(val, dp->p.key, size)) {
+                            if (!strncmp(args[0], dp->p.key, size)) {
 
                                 if (mandatory == '*') {
-                                	dp->p.required = 1;
+                                    dp->p.required = 1;
                                 }
 
                                 result = apr_array_push(dp->p.values);
 
-                                result->size = len - (equals - val) - 2;
-                                result->name = apr_pstrndup(dp->pool, equals + 1, result->size);
+                                result->size = len - (offsets->equals) - 2;
+                                result->name = apr_pstrndup(dp->pool, args[0] + offsets->equals + 1, result->size);
 
-                                if (size < (equals - val)) {
-                                    dp->p.key = apr_pstrndup(dp->pool, val, equals - val);
+                                if (size < (offsets->equals)) {
+                                    dp->p.key = apr_pstrndup(dp->pool, args[0], offsets->equals);
                                 }
 
                             }
@@ -1314,7 +1340,7 @@ device_parse_t *device_parameter_make(device_parse_t *dp,
                         }
                     }
                     else {
-                        if (equals) {
+                        if (offsets->equals > -1) {
                             if (mandatory == '*') {
                                 result = apr_array_push(dp->p.requires);
                             }
@@ -1322,14 +1348,14 @@ device_parse_t *device_parameter_make(device_parse_t *dp,
                                 result = apr_array_push(dp->p.keys);
                             }
 
-                            result->size = equals - val;
-                            result->name = apr_pstrndup(dp->pool, val, result->size);
+                            result->size = offsets->equals;
+                            result->name = apr_pstrndup(dp->pool, args[0], result->size);
                         }
                         else {
                             result = apr_array_push(dp->p.values);
 
                             result->size = len - 1;
-                            result->name = apr_pstrndup(dp->pool, val, result->size);
+                            result->name = apr_pstrndup(dp->pool, args[0], result->size);
                         }
                     }
 
@@ -1605,7 +1631,7 @@ apr_status_t device_parse(device_t *d, const char *arg,
 
                 }
                 else if (rname) {
-                	current->p.required = 1;
+                    current->p.required = 1;
                     current->p.key = rname->name;
                     current->p.value = "";
                     current->name = apr_pstrcat(current->pool, current->p.key, NULL);

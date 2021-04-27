@@ -109,8 +109,13 @@ int device_compgen(device_t *d, const char *context)
         }
         else if (current->type == DEVICE_PARSE_PARAMETER) {
 
-            if (current->p.key && current->p.value && current->p.value[0]) {
-                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, current->p.value, " ", NULL));
+            if (current->p.key && current->offset->equals > -1) {
+                if (current->p.value[0]) {
+                    apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, current->p.value, " ", NULL));
+                }
+                else {
+                    /* key but empty value, print nothing */
+                }
             }
             else {
                 apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, current->name, current->completion, NULL));

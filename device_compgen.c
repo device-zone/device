@@ -22,6 +22,7 @@
 #include "device_compgen.h"
 
 #include <apr_lib.h>
+#include <apr_strings.h>
 
 #include "config.h"
 #include "device.h"
@@ -58,7 +59,7 @@ int device_compgen(device_t *d, const char *context)
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.containers, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", name->name);
+                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, " ", NULL));
 
             }
 
@@ -66,7 +67,7 @@ int device_compgen(device_t *d, const char *context)
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.commands, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", name->name);
+                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, " ", NULL));
 
             }
 
@@ -76,7 +77,7 @@ int device_compgen(device_t *d, const char *context)
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.builtins, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", name->name);
+                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, " ", NULL));
 
             }
 #endif
@@ -85,7 +86,7 @@ int device_compgen(device_t *d, const char *context)
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", name->name);
+                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, "=", NULL));
 
             }
 
@@ -93,7 +94,7 @@ int device_compgen(device_t *d, const char *context)
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", name->name);
+                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, "=", NULL));
 
             }
 
@@ -101,14 +102,24 @@ int device_compgen(device_t *d, const char *context)
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", name->name);
+                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, " ", NULL));
 
+            }
+
+        }
+        else if (current->type == DEVICE_PARSE_PARAMETER) {
+
+            if (current->p.key && current->p.value && current->p.value[0]) {
+                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, current->p.value, " ", NULL));
+            }
+            else {
+                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, current->name, current->completion, NULL));
             }
 
         }
         else if (current->name) {
 
-            apr_file_printf(d->out, "%s\n", current->name);
+            apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, current->name, current->completion, NULL));
 
         }
 

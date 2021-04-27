@@ -75,7 +75,7 @@ device_completion_hook(char *token, int *match)
                 *match = 1;
 
                 /* return a string that can be free()'d */
-                res = strdup(device_pescape_shell(pool, current->a.common));
+                res = strdup(current->a.common);
 
             }
             else {
@@ -86,13 +86,47 @@ device_completion_hook(char *token, int *match)
             }
 
         }
+        else if (current->type == DEVICE_PARSE_PARAMETER) {
+
+            if (current->p.key && current->offset->equals > -1) {
+                if (current->p.value[0]) {
+
+                    /* unique */
+                    *match = 1;
+
+                    /* return a string that can be free()'d */
+                    const char *n = current->p.value;
+                    if (strlen(token) <= strlen(n)) {
+                        res = strdup(apr_pstrcat(pool, n + strlen(token), current->completion, NULL));
+                    }
+
+                }
+                else {
+                    /* key but empty value, print nothing */
+                }
+            }
+            else {
+
+                /* unique */
+                *match = 1;
+
+                /* return a string that can be free()'d */
+                const char *n = current->name;
+                if (strlen(token) <= strlen(n)) {
+                    res = strdup(apr_pstrcat(pool, n + strlen(token), current->completion, NULL));
+                }
+
+            }
+
+        }
         else {
 
             /* unique */
             *match = 1;
 
             /* return a string that can be free()'d */
-            const char *n = device_pescape_shell(pool, current->name);
+//            const char *n = device_pescape_shell(pool, current->name);
+            const char *n = current->name;
             if (strlen(token) <= strlen(n)) {
                 res = strdup(apr_pstrcat(pool, n + strlen(token), current->completion, NULL));
             }
@@ -209,7 +243,7 @@ device_list_possible_hook(char *token, char ***av)
 
                     /* return a string that can be free()'d */
                     *a = strdup(apr_pstrcat(pool, device_pescape_shell(pool,
-                    		current->p.value), current->completion, NULL));
+                            current->p.value), current->completion, NULL));
 
                 }
                 else {

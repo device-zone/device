@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <replxx.h>
 
+#include <apr_escape.h>
 #include <apr_strings.h>
 
 static apr_status_t cleanup_replxx(void *dummy)
@@ -71,74 +72,123 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
     apr_status_t status;
     int i;
 
-    if (APR_SUCCESS != device_tokenize_to_argv(context, &args, &offsets, &states, &state, &error, d->tpool)) {
+    if (APR_SUCCESS
+            != device_tokenize_to_argv(context, &args, &offsets, &states,
+                    &state, &error, d->tpool)) {
 
         /* do nothing */
 
     }
 
-    else if (APR_SUCCESS == (status = device_complete(d, args, offsets, state, &current, &pool))) {
+    else if (APR_SUCCESS
+            == (status = device_complete(d, args, offsets, state, &current,
+                    &pool))) {
 
         if (current->type == DEVICE_PARSE_AMBIGUOUS) {
 
             for (i = 0; i < current->a.containers->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.containers, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.containers, i, const device_name_t);
 
 //                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
-                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, " ", NULL), REPLXX_COLOR_BLUE);
+                replxx_add_color_completion(lc,
+                        apr_pstrcat(pool,
+                                device_pescape_shell(pool, name->name), " ",
+                                NULL), REPLXX_COLOR_BLUE);
 
             }
 
             for (i = 0; i < current->a.commands->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.commands, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.commands, i, const device_name_t);
 
 //                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
-                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, " ", NULL), REPLXX_COLOR_BRIGHTBLUE);
+                replxx_add_color_completion(lc,
+                        apr_pstrcat(pool,
+                                device_pescape_shell(pool, name->name), " ",
+                                NULL), REPLXX_COLOR_BRIGHTBLUE);
 
             }
 
             for (i = 0; i < current->a.builtins->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.builtins, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.builtins, i, const device_name_t);
 
 //                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
-                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, " ", NULL), REPLXX_COLOR_CYAN);
+                replxx_add_color_completion(lc,
+                        apr_pstrcat(pool,
+                                device_pescape_shell(pool, name->name), " ",
+                                NULL), REPLXX_COLOR_CYAN);
 
             }
 
             for (i = 0; i < current->a.keys->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
 
 //                replxx_add_completion(lc, apr_pstrcat(pool, name->name, "=", NULL));
-                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, "=", NULL), REPLXX_COLOR_MAGENTA);
+                replxx_add_color_completion(lc,
+                        apr_pstrcat(pool,
+                                device_pescape_shell(pool, name->name), "=",
+                                NULL), REPLXX_COLOR_MAGENTA);
 
             }
 
             for (i = 0; i < current->a.requires->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
 
 //                replxx_add_completion(lc, apr_pstrcat(pool, name->name, "=", NULL));
-                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, "=", NULL), REPLXX_COLOR_BRIGHTMAGENTA);
+                replxx_add_color_completion(lc,
+                        apr_pstrcat(pool,
+                                device_pescape_shell(pool, name->name), "=",
+                                NULL), REPLXX_COLOR_BRIGHTMAGENTA);
 
             }
 
             for (i = 0; i < current->a.values->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
 
 //                replxx_add_completion(lc, apr_pstrcat(pool, name->name, " ", NULL));
-                replxx_add_color_completion(lc, apr_pstrcat(pool, name->name, " ", NULL), REPLXX_COLOR_MAGENTA);
+                replxx_add_color_completion(lc,
+                        apr_pstrcat(pool,
+                                device_pescape_shell(pool, name->name), " ",
+                                NULL), REPLXX_COLOR_MAGENTA);
 
+            }
+
+        }
+        else if (current->type == DEVICE_PARSE_PARAMETER) {
+
+            if (current->p.key && current->offset->equals > -1) {
+                if (current->p.value[0]) {
+                    replxx_add_completion(lc,
+                            apr_pstrcat(pool, device_pescape_shell(pool, current->p.value),
+                                    current->completion, NULL));
+                }
+                else {
+                    /* key but empty value, print nothing */
+                }
+            }
+            else {
+                replxx_add_completion(lc,
+                        apr_pstrcat(pool, device_pescape_shell(pool, current->name),
+                                current->completion, NULL));
             }
 
         }
         else {
 
-            replxx_add_completion(lc, apr_pstrcat(pool, current->name, current->completion, NULL));
+            replxx_add_completion(lc,
+                    apr_pstrcat(pool, device_pescape_shell(pool, current->name),
+                            current->completion, NULL));
 
         }
 

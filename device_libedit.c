@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <histedit.h>
 
+#include <apr_escape.h>
 #include <apr_strings.h>
 
 static apr_status_t cleanup_editline(void *dummy)
@@ -135,12 +136,14 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
 
             for (i = 0; i < current->a.containers->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.containers, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.containers, i, const device_name_t);
 
                 char **entry = apr_array_push(list);
-                *entry = apr_pstrcat(pool, "\033[34m", name->name, "\033[0m ", NULL);
+                const char *n = device_pescape_shell(pool, name->name);
+                *entry = apr_pstrcat(pool, "\033[34m", n, "\033[0m ", NULL);
 
-                len = strlen(name->name);
+                len = strlen(n);
                 if (len > maxlen) {
                     maxlen = len;
                 }
@@ -152,9 +155,10 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.commands, i, const device_name_t);
 
                 char **entry = apr_array_push(list);
-                *entry = apr_pstrcat(pool, "\033[1;34m", name->name, "\033[0m ", NULL);
+                const char *n = device_pescape_shell(pool, name->name);
+                *entry = apr_pstrcat(pool, "\033[1;34m", n, "\033[0m ", NULL);
 
-                len = strlen(name->name);
+                len = strlen(n);
                 if (len > maxlen) {
                     maxlen = len;
                 }
@@ -166,9 +170,10 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.builtins, i, const device_name_t);
 
                 char **entry = apr_array_push(list);
-                *entry = apr_pstrcat(pool, "\033[34m", name->name, "\033[0m ", NULL);
+                const char *n = device_pescape_shell(pool, name->name);
+                *entry = apr_pstrcat(pool, "\033[34m", n, "\033[0m ", NULL);
 
-                len = strlen(name->name);
+                len = strlen(n);
                 if (len > maxlen) {
                     maxlen = len;
                 }
@@ -180,9 +185,10 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
 
                 char **entry = apr_array_push(list);
-                *entry = apr_pstrcat(pool, "\033[35m", name->name, "\033[0m ", NULL);
+                const char *n = device_pescape_shell(pool, name->name);
+                *entry = apr_pstrcat(pool, "\033[35m", n, "\033[0m ", NULL);
 
-                len = strlen(name->name);
+                len = strlen(n);
                 if (len > maxlen) {
                     maxlen = len;
                 }
@@ -194,9 +200,10 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
 
                 char **entry = apr_array_push(list);
-                *entry = apr_pstrcat(pool, "\033[1;35m", name->name, "\033[0m ", NULL);
+                const char *n = device_pescape_shell(pool, name->name);
+                *entry = apr_pstrcat(pool, "\033[1;35m", n, "\033[0m ", NULL);
 
-                len = strlen(name->name);
+                len = strlen(n);
                 if (len > maxlen) {
                     maxlen = len;
                 }
@@ -208,9 +215,10 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
 
                 char **entry = apr_array_push(list);
-                *entry = apr_pstrcat(pool, "\033[1;35m", name->name, "\033[0m ", NULL);
+                const char *n = device_pescape_shell(pool, name->name);
+                *entry = apr_pstrcat(pool, "\033[1;35m", n, "\033[0m ", NULL);
 
-                len = strlen(name->name);
+                len = strlen(n);
                 if (len > maxlen) {
                     maxlen = len;
                 }
@@ -222,13 +230,55 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
             res = CC_REDISPLAY;
 
         }
+        else if (current->type == DEVICE_PARSE_PARAMETER) {
+
+            if (current->p.key && current->offset->equals > -1) {
+                if (current->p.value[0]) {
+
+                    apr_size_t len = lf->cursor - lf->buffer;
+
+                    if (current->offset && current->offset->start < len) {
+                        el_deletestr(el, len - current->offset->start);
+                        el_insertstr(el,
+                                apr_pstrcat(pool,
+                                        device_pescape_shell(pool, current->p.value),
+                                        current->completion, NULL));
+                    }
+
+                    res = CC_REFRESH;
+
+                }
+                else {
+                    /* key but empty value, print nothing */
+                }
+            }
+            else {
+
+                apr_size_t len = lf->cursor - lf->buffer;
+
+                if (current->offset && current->offset->start < len) {
+                    el_deletestr(el, len - current->offset->start);
+                    el_insertstr(el,
+                            apr_pstrcat(pool,
+                                    device_pescape_shell(pool, current->name),
+                                    current->completion, NULL));
+                }
+
+                res = CC_REFRESH;
+
+            }
+
+        }
         else {
 
             apr_size_t len = lf->cursor - lf->buffer;
 
             if (current->offset && current->offset->start < len) {
                 el_deletestr(el, len - current->offset->start);
-                el_insertstr(el, apr_pstrcat(pool, current->name, current->completion, NULL));
+                el_insertstr(el,
+                        apr_pstrcat(pool,
+                                device_pescape_shell(pool, current->name),
+                                current->completion, NULL));
             }
 
             res = CC_REFRESH;
@@ -244,27 +294,6 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
 
     apr_pool_clear(d->tpool);
 
-        /*
-         * Find the last word
-         */
-//        for (ptr = lf->cursor - 1;
-//            !isspace((unsigned char)*ptr) && ptr > lf->buffer; ptr--)
-//                continue;
-//        len = lf->cursor - ++ptr;
-
-//        for (dp = readdir(dd); dp != NULL; dp = readdir(dd)) {
-//                if (len > strlen(dp->d_name))
-//                        continue;
-//                if (strncmp(dp->d_name, ptr, len) == 0) {
-//                        if (el_insertstr(el, &dp->d_name[len]) == -1)
-//                                res = CC_ERROR;
-//                        else
-//                                res = CC_REFRESH;
-//                        break;
-//                }
-//        }
-
-//        closedir(dd);
     return res;
 }
 

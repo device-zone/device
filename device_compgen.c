@@ -23,6 +23,7 @@
 
 #include <apr_lib.h>
 #include <apr_strings.h>
+#include <apr_escape.h>
 
 #include "config.h"
 #include "device.h"
@@ -39,7 +40,9 @@ int device_compgen(device_t *d, const char *context)
     apr_status_t status;
     int i;
 
-    if (APR_SUCCESS != device_tokenize_to_argv(context, &args, &offsets, &states, &state, &error, d->tpool)) {
+    if (APR_SUCCESS
+            != device_tokenize_to_argv(context, &args, &offsets, &states,
+                    &state, &error, d->tpool)) {
 
         /* do nothing */
 
@@ -51,23 +54,31 @@ int device_compgen(device_t *d, const char *context)
 
     }
 
-    else if (APR_SUCCESS == (status = device_complete(d, args, offsets, state, &current, &pool))) {
+    else if (APR_SUCCESS
+            == (status = device_complete(d, args, offsets, state, &current,
+                    &pool))) {
 
         if (current->type == DEVICE_PARSE_AMBIGUOUS) {
 
             for (i = 0; i < current->a.containers->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.containers, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.containers, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, " ", NULL));
+                apr_file_printf(d->out, "%s\n",
+                        apr_pstrcat(pool, device_pescape_shell(pool, name->name),
+                                " ", NULL));
 
             }
 
             for (i = 0; i < current->a.commands->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.commands, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.commands, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, " ", NULL));
+                apr_file_printf(d->out, "%s\n",
+                        apr_pstrcat(pool, device_pescape_shell(pool, name->name),
+                                " ", NULL));
 
             }
 
@@ -77,32 +88,41 @@ int device_compgen(device_t *d, const char *context)
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.builtins, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, " ", NULL));
+                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, device_pescape_shell(pool, name->name), " ", NULL));
 
             }
 #endif
 
             for (i = 0; i < current->a.keys->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, "=", NULL));
+                apr_file_printf(d->out, "%s\n",
+                        apr_pstrcat(pool, device_pescape_shell(pool, name->name),
+                                "=", NULL));
 
             }
 
             for (i = 0; i < current->a.requires->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, "=", NULL));
+                apr_file_printf(d->out, "%s\n",
+                        apr_pstrcat(pool, device_pescape_shell(pool, name->name),
+                                "=", NULL));
 
             }
 
             for (i = 0; i < current->a.values->nelts; i++)
             {
-                const device_name_t *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
+                const device_name_t
+                    *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
 
-                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, name->name, " ", NULL));
+                apr_file_printf(d->out, "%s\n",
+                        apr_pstrcat(pool, device_pescape_shell(pool, name->name),
+                                " ", NULL));
 
             }
 
@@ -111,20 +131,28 @@ int device_compgen(device_t *d, const char *context)
 
             if (current->p.key && current->offset->equals > -1) {
                 if (current->p.value[0]) {
-                    apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, current->p.value, " ", NULL));
+                    apr_file_printf(d->out, "%s\n",
+                            apr_pstrcat(pool,
+                                    device_pescape_shell(pool, current->p.value),
+                                    " ", NULL));
                 }
                 else {
                     /* key but empty value, print nothing */
                 }
             }
             else {
-                apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, current->name, current->completion, NULL));
+                apr_file_printf(d->out, "%s\n",
+                        apr_pstrcat(pool,
+                                device_pescape_shell(pool, current->name),
+                                current->completion, NULL));
             }
 
         }
         else if (current->name) {
 
-            apr_file_printf(d->out, "%s\n", apr_pstrcat(pool, current->name, current->completion, NULL));
+            apr_file_printf(d->out, "%s\n",
+                    apr_pstrcat(pool, device_pescape_shell(pool, current->name),
+                            current->completion, NULL));
 
         }
 

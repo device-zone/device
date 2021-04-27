@@ -28,6 +28,7 @@
 
 #include "linenoise.h"
 
+#include <apr_escape.h>
 #include <apr_strings.h>
 
 #include <stdlib.h>
@@ -62,7 +63,7 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.containers, i, const device_name_t);
 
-                linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, " ", NULL));
+                linenoiseAddCompletion(lc, apr_pstrcat(pool, device_pescape_shell(pool, name->name), " ", NULL));
 
             }
 
@@ -70,7 +71,7 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.commands, i, const device_name_t);
 
-                linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, " ", NULL));
+                linenoiseAddCompletion(lc, apr_pstrcat(pool, device_pescape_shell(pool, name->name), " ", NULL));
 
             }
 
@@ -78,7 +79,7 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.builtins, i, const device_name_t);
 
-                linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, " ", NULL));
+                linenoiseAddCompletion(lc, apr_pstrcat(pool, device_pescape_shell(pool, name->name), " ", NULL));
 
             }
 
@@ -86,7 +87,7 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
 
-                linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, "=", NULL));
+                linenoiseAddCompletion(lc, apr_pstrcat(pool, device_pescape_shell(pool, name->name), "=", NULL));
 
             }
 
@@ -94,7 +95,7 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
 
-                linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, "=", NULL));
+                linenoiseAddCompletion(lc, apr_pstrcat(pool, device_pescape_shell(pool, name->name), "=", NULL));
 
             }
 
@@ -102,14 +103,29 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
             {
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
 
-                linenoiseAddCompletion(lc, apr_pstrcat(pool, name->name, " ", NULL));
+                linenoiseAddCompletion(lc, apr_pstrcat(pool, device_pescape_shell(pool, name->name), " ", NULL));
 
+            }
+
+        }
+        else if (current->type == DEVICE_PARSE_PARAMETER) {
+
+            if (current->p.key && current->offset->equals > -1) {
+                if (current->p.value[0]) {
+                    linenoiseAddCompletion(lc, apr_pstrcat(pool, device_pescape_shell(pool, current->p.value), current->completion, NULL));
+                }
+                else {
+                    /* key but empty value, print nothing */
+                }
+            }
+            else {
+                linenoiseAddCompletion(lc, apr_pstrcat(pool, device_pescape_shell(pool, current->name), current->completion, NULL));
             }
 
         }
         else {
 
-            linenoiseAddCompletion(lc, apr_pstrcat(pool, current->name, current->completion, NULL));
+            linenoiseAddCompletion(lc, apr_pstrcat(pool, device_pescape_shell(pool, current->name), current->completion, NULL));
 
         }
 
@@ -120,21 +136,6 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
     }
 
     apr_pool_clear(d->tpool);
-
-//        char** examples = (char**)( ud );
-//        size_t i;
-
-//        int utf8ContextLen = context_len( context );
-//        int prefixLen = (int)strlen( context ) - utf8ContextLen;
-//        *contextLen = utf8str_codepoint_len( context + prefixLen, utf8ContextLen );
-//        for (i = 0;     examples[i] != NULL; ++i) {
-//                if (strncmp(context + prefixLen, examples[i], utf8ContextLen) == 0) {
-//                        replxx_add_completion(lc, examples[i]);
-//                }
-//        }
-
-//    replxx_add_completion(lc, "xfoo");
-//    replxx_add_completion(lc, "xbar");
 
 }
 

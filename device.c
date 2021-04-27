@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <apr_escape.h>
 #include <apr_file_io.h>
 #include <apr_file_info.h>
 #include <apr_general.h>
@@ -295,6 +296,14 @@ apr_status_t device_tokenize_to_argv(const char *arg_str, const char ***argv_out
                 break; \
             case DEVICE_TOKEN_ESCAPE_SLASH: /* seen \ */ \
                 switch (ch) { \
+                case ' ': /* space */ \
+                    if (convert) { \
+                        *cc++ = ' '; \
+                        if (offset) *offset++ = (cp - arg_str); \
+                    } \
+                    length++; \
+                    state->escaped = DEVICE_TOKEN_WASESCAPE; \
+                    break; \
                 case 'a': /* \a bell */ \
                     if (convert) { \
                         *cc++ = '\a'; \
@@ -811,6 +820,47 @@ apr_status_t device_tokenize_to_argv(const char *arg_str, const char ***argv_out
     argv[argnum] = NULL;
 
     return APR_SUCCESS;
+}
+
+const char *device_pescape_shell(apr_pool_t *p, const char *str)
+{
+
+     str = apr_pescape_shell(p, str);
+
+     if (str) {
+          int i;
+          int count = 0;
+
+          /* count spaces */
+          for (i = 0; str[i]; i++) {
+               if (str[i] == ' ') {
+                    count++;
+               }
+          }
+
+          /* escape spaces */
+          if (count) {
+
+               char *d;
+              const char *s;
+
+              s = str;
+              d = apr_palloc(p, strlen(str) + count + 1);
+              str = d;
+
+            for (; *s; ++s) {
+                 if (*s == ' ') {
+                      *d++ = '\\';
+                 }
+                  *d++ = *s;
+            }
+
+            *d = 0;
+
+          }
+     }
+
+     return str;
 }
 
 apr_array_header_t *device_parse_pathext(apr_pool_t *pool, const char *pathext)

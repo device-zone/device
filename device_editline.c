@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <editline.h>
 
+#include <apr_escape.h>
 #include <apr_strings.h>
 #include <apr_hash.h>
 
@@ -74,7 +75,7 @@ device_completion_hook(char *token, int *match)
                 *match = 1;
 
                 /* return a string that can be free()'d */
-                res = strdup(current->a.common);
+                res = strdup(device_pescape_shell(pool, current->a.common));
 
             }
             else {
@@ -91,8 +92,9 @@ device_completion_hook(char *token, int *match)
             *match = 1;
 
             /* return a string that can be free()'d */
-            if (strlen(token) <= strlen(current->name)) {
-                res = strdup(apr_pstrcat(pool, current->name + strlen(token), current->completion, NULL));
+            const char *n = device_pescape_shell(pool, current->name);
+            if (strlen(token) <= strlen(n)) {
+                res = strdup(apr_pstrcat(pool, n + strlen(token), current->completion, NULL));
             }
 
         }
@@ -146,7 +148,7 @@ device_list_possible_hook(char *token, char ***av)
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.containers, i, const device_name_t);
 
                 /* return a string that can be free()'d */
-                a[j++] = strdup(name->name);
+                a[j++] = strdup(device_pescape_shell(pool, name->name));
 
             }
 
@@ -155,7 +157,7 @@ device_list_possible_hook(char *token, char ***av)
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.commands, i, const device_name_t);
 
                 /* return a string that can be free()'d */
-                a[j++] = strdup(name->name);
+                a[j++] = strdup(device_pescape_shell(pool, name->name));
 
             }
 
@@ -164,7 +166,7 @@ device_list_possible_hook(char *token, char ***av)
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.builtins, i, const device_name_t);
 
                 /* return a string that can be free()'d */
-                a[j++] = strdup(name->name);
+                a[j++] = strdup(device_pescape_shell(pool, name->name));
 
             }
 
@@ -173,7 +175,7 @@ device_list_possible_hook(char *token, char ***av)
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.keys, i, const device_name_t);
 
                 /* return a string that can be free()'d */
-                a[j++] = strdup(name->name);
+                a[j++] = strdup(device_pescape_shell(pool, name->name));
 
             }
 
@@ -182,7 +184,7 @@ device_list_possible_hook(char *token, char ***av)
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.requires, i, const device_name_t);
 
                 /* return a string that can be free()'d */
-                a[j++] = strdup(name->name);
+                a[j++] = strdup(device_pescape_shell(pool, name->name));
 
             }
 
@@ -191,7 +193,37 @@ device_list_possible_hook(char *token, char ***av)
                 const device_name_t *name = &APR_ARRAY_IDX(current->a.values, i, const device_name_t);
 
                 /* return a string that can be free()'d */
-                a[j++] = strdup(name->name);
+                a[j++] = strdup(device_pescape_shell(pool, name->name));
+
+            }
+
+        }
+        else if (current->type == DEVICE_PARSE_PARAMETER) {
+
+            if (current->p.key && current->offset->equals > -1) {
+                if (current->p.value[0]) {
+
+                    count = 1;
+
+                    *av = a = malloc(sizeof(char *));
+
+                    /* return a string that can be free()'d */
+                    *a = strdup(apr_pstrcat(pool, device_pescape_shell(pool,
+                    		current->p.value), current->completion, NULL));
+
+                }
+                else {
+                    /* key but empty value, print nothing */
+                }
+            }
+            else {
+
+                count = 1;
+
+                *av = a = malloc(sizeof(char *));
+
+                /* return a string that can be free()'d */
+                *a = strdup(apr_pstrcat(pool, device_pescape_shell(pool, current->name), "", NULL));
 
             }
 
@@ -203,7 +235,7 @@ device_list_possible_hook(char *token, char ***av)
             *av = a = malloc(sizeof(char *));
 
             /* return a string that can be free()'d */
-            *a = strdup(apr_pstrcat(pool, current->name, "", NULL));
+            *a = strdup(apr_pstrcat(pool, device_pescape_shell(pool, current->name), "", NULL));
 
         }
 

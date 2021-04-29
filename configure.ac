@@ -85,7 +85,7 @@ AC_TYPE_SSIZE_T
 AC_TYPE_UINT32_T
 
 # Checks for headers
-AC_CHECK_HEADERS([termios.h])
+AC_CHECK_HEADERS([libgen.h termios.h])
 
 # Checks for library functions.
 AC_FUNC_MALLOC

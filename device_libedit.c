@@ -52,8 +52,10 @@ static char *prompt(EditLine *el __attribute__((__unused__)))
 
     el_get(el, EL_CLIENTDATA, &d);
 
-    return apr_psprintf(d->tpool, "\1\033[1;37m\1(device)\1\033[0m\1 \1\033[1;32m\1%s@%s\1\033[0m\1 /%s> ",
-            d->user, d->hostname, d->args ? apr_array_pstrcat(d->tpool, d->args, ' ') : "");
+    return apr_psprintf(d->tpool,
+            "\1\033[1;37m\1(%s)\1\033[0m\1 \1\033[1;32m\1%s@%s\1\033[0m\1 /%s> ",
+            d->base, d->user, d->hostname,
+            d->args ? apr_array_pstrcat(d->tpool, d->args, ' ') : "");
 }
 
 static void display_list(EditLine *el, apr_array_header_t *list, apr_ssize_t maxlen)

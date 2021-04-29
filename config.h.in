@@ -18,6 +18,9 @@
 /* Define to 1 if you have the `editline' library (-leditline). */
 #undef HAVE_LIBEDITLINE
 
+/* Define to 1 if you have the <libgen.h> header file. */
+#undef HAVE_LIBGEN_H
+
 /* Define to 1 if you have the `replxx' library (-lreplxx). */
 #undef HAVE_LIBREPLXX
 

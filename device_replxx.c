@@ -306,8 +306,10 @@ static void device_colour_hook(char const *context, ReplxxColor *colours, int si
 
 static const char *device_prompt(device_t *d)
 {
-    return apr_psprintf(d->tpool, "\x1b[1;37m(device)\x1b[0m \x1b[1;32m%s@%s\x1b[0m /%s> ",
-            d->user, d->hostname, d->args ? apr_array_pstrcat(d->tpool, d->args, ' ') : "");
+    return apr_psprintf(d->tpool,
+            "\x1b[1;37m(%s)\x1b[0m \x1b[1;32m%s@%s\x1b[0m /%s> ", d->base,
+            d->user, d->hostname,
+            d->args ? apr_array_pstrcat(d->tpool, d->args, ' ') : "");
 }
 
 int device_replxx(device_t *d)

@@ -38,8 +38,8 @@ static device_t *device = NULL;
 
 static char *device_prompt(device_t *d)
 {
-    return apr_psprintf(d->tpool, "(device) %s@%s /%s> ",
-            d->user, d->hostname, d->args ? apr_array_pstrcat(d->tpool, d->args, ' ') : "");
+    return apr_psprintf(d->tpool, "(%s) %s@%s /%s> ", d->base, d->user, d->hostname,
+            d->args ? apr_array_pstrcat(d->tpool, d->args, ' ') : "");
 }
 
 static char *

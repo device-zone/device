@@ -123,6 +123,7 @@ typedef struct device_t {
     apr_file_t *err;
     apr_file_t *in;
     apr_file_t *out;
+    const char *base;
     const char *user;
     const char *hostname;
     const char *libexec;

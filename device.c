@@ -47,12 +47,17 @@
 #include <termios.h>
 #endif
 
+#if HAVE_LIBGEN_H
+#include <libgen.h>
+#endif
+
 #define DEVICE_PATHEXT "PATHEXT"
 #define DEVICE_ENV_EDITLINE "DEVICE_EDITLINE"
 #define DEVICE_PKGLIBEXECDIR "DEVICE_LIBEXEC"
 #define DEFAULT_PKGLIBEXECDIR PKGLIBEXECDIR
 #define DEVICE_PKGSYSCONFDIR "DEVICE_SYSCONF"
 #define DEFAULT_PKGSYSCONFDIR PKGSYSCONFDIR
+#define DEFAULT_BASE "device"
 
 #define DEVICE_COMPLINE "COMP_LINE"
 #define DEVICE_COMMANDLINE "COMMAND_LINE"
@@ -2464,6 +2469,12 @@ int main(int argc, const char * const argv[])
     apr_file_open_stderr(&d.err, d.pool);
     apr_file_open_stdin(&d.in, d.pool);
     apr_file_open_stdout(&d.out, d.pool);
+
+#if HAVE_LIBGEN_H
+    d.base = basename(apr_pstrdup(d.pool, argv[0]));
+#else
+    d.base = DEFAULT_BASE;
+#endif
 
     d.pathext = device_parse_pathext(d.pool, pathext);
 

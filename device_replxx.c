@@ -172,7 +172,7 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
             if (current->p.key && current->offset->equals > -1) {
                 if (current->p.value[0]) {
                     replxx_add_completion(lc,
-                            apr_pstrcat(pool, device_pescape_shell(pool, current->p.value),
+                            apr_pstrcat(pool, device_pescape_shell(pool, current->name),
                                     current->completion, NULL));
                 }
                 else {
@@ -199,8 +199,6 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
     if (pool) {
         apr_pool_destroy(pool);
     }
-
-    apr_pool_clear(d->tpool);
 
     device_restore_termios();
 }
@@ -302,8 +300,6 @@ static void device_colour_hook(char const *context, ReplxxColor *colours, int si
     if (pool) {
         apr_pool_destroy(pool);
     }
-
-    apr_pool_clear(d->tpool);
 
     device_restore_termios();
 }

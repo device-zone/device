@@ -141,8 +141,6 @@ device_completion_hook(char *token, int *match)
         apr_pool_destroy(pool);
     }
 
-    apr_pool_clear(d->tpool);
-
     device_restore_termios();
 
     return res;

@@ -294,8 +294,6 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
         apr_pool_destroy(pool);
     }
 
-    apr_pool_clear(d->tpool);
-
     device_restore_termios();
 
     return res;

@@ -20,6 +20,7 @@ AC_ARG_WITH(replxx,[  --with-replxx      use replxx library],
     if test "$with_replxx" != "no"; then
       AC_CHECK_HEADERS(replxx.h)
       AC_CHECK_LIB(replxx,replxx_init)
+      AC_CHECK_FUNCS([replxx_add_color_completion])
     fi
   ])
 

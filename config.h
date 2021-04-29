@@ -32,6 +32,9 @@
    to 0 otherwise. */
 #define HAVE_MALLOC 1
 
+/* Define to 1 if you have the `replxx_add_color_completion' function. */
+#define HAVE_REPLXX_ADD_COLOR_COMPLETION 1
+
 /* Define to 1 if you have the <replxx.h> header file. */
 #define HAVE_REPLXX_H 1
 

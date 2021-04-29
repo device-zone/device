@@ -881,11 +881,9 @@ void device_save_termios()
 void device_restore_termios()
 {
 #if HAVE_TCGETATTR
-    tcsetattr(0, TCSADRAIN, &termios);
+    tcsetattr(0, TCSANOW, &termios);
 #endif
 }
-
-
 
 apr_array_header_t *device_parse_pathext(apr_pool_t *pool, const char *pathext)
 {

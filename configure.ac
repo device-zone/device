@@ -84,9 +84,12 @@ AC_TYPE_SIZE_T
 AC_TYPE_SSIZE_T
 AC_TYPE_UINT32_T
 
+# Checks for headers
+AC_CHECK_HEADERS([termios.h])
+
 # Checks for library functions.
 AC_FUNC_MALLOC
-AC_CHECK_FUNCS([getopt])
+AC_CHECK_FUNCS([tcgetattr])
 
 AC_OUTPUT
 

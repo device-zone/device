@@ -116,6 +116,8 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
     int res = CC_ERROR;
     int i;
 
+    device_save_termios();
+
     el_get(el, EL_CLIENTDATA, &d);
 
     if (APR_SUCCESS != device_tokenize_to_argv(apr_pstrndup(d->tpool, lf->buffer, lf->cursor - lf->buffer),
@@ -293,6 +295,8 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
     }
 
     apr_pool_clear(d->tpool);
+
+    device_restore_termios();
 
     return res;
 }

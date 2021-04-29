@@ -184,6 +184,10 @@ apr_status_t device_tokenize_to_argv(const char *arg_str, const char ***argv_out
 
 const char *device_pescape_shell(apr_pool_t *p, const char *str);
 
+void device_save_termios();
+
+void device_restore_termios();
+
 apr_status_t device_colourise(device_t *d, const char **args,
         device_offset_t *offsets, device_tokenize_state_t state,
         device_parse_t **result, apr_pool_t **pool);

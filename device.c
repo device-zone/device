@@ -43,6 +43,10 @@
 #include "device_replxx.h"
 #include "device_libedit.h"
 
+#if HAVE_TERMIOS_H
+#include <termios.h>
+#endif
+
 #define DEVICE_PATHEXT "PATHEXT"
 #define DEVICE_ENV_EDITLINE "DEVICE_EDITLINE"
 #define DEVICE_PKGLIBEXECDIR "DEVICE_LIBEXEC"
@@ -862,6 +866,26 @@ const char *device_pescape_shell(apr_pool_t *p, const char *str)
 
      return str;
 }
+
+#if HAVE_TCGETATTR
+static struct termios termios;
+#endif
+
+void device_save_termios()
+{
+#if HAVE_TCGETATTR
+    tcgetattr(0, &termios);
+#endif
+}
+
+void device_restore_termios()
+{
+#if HAVE_TCGETATTR
+    tcsetattr(0, TCSADRAIN, &termios);
+#endif
+}
+
+
 
 apr_array_header_t *device_parse_pathext(apr_pool_t *pool, const char *pathext)
 {

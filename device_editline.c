@@ -57,6 +57,8 @@ device_completion_hook(char *token, int *match)
     device_parse_t *current;
     apr_status_t status;
 
+    device_save_termios();
+
     if (APR_SUCCESS != device_tokenize_to_argv(apr_pstrndup(d->tpool, rl_line_buffer, rl_point),
             &args, &offsets, &states, &state, &error, d->tpool)) {
 
@@ -141,6 +143,8 @@ device_completion_hook(char *token, int *match)
 
     apr_pool_clear(d->tpool);
 
+    device_restore_termios();
+
     return res;
 }
 
@@ -160,6 +164,8 @@ device_list_possible_hook(char *token, char ***av)
     apr_status_t status;
     int i, j = 0;
     int count = 0;
+
+    device_save_termios();
 
     if (APR_SUCCESS != device_tokenize_to_argv(apr_pstrndup(d->tpool, rl_line_buffer, rl_point),
             &args, &offsets, &states, &state, &error, d->tpool)) {
@@ -280,6 +286,8 @@ device_list_possible_hook(char *token, char ***av)
     }
 
     apr_pool_clear(d->tpool);
+
+    device_restore_termios();
 
     return count;
 }

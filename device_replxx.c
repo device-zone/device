@@ -72,6 +72,8 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
     apr_status_t status;
     int i;
 
+    device_save_termios();
+
     if (APR_SUCCESS
             != device_tokenize_to_argv(context, &args, &offsets, &states,
                     &state, &error, d->tpool)) {
@@ -200,6 +202,7 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
 
     apr_pool_clear(d->tpool);
 
+    device_restore_termios();
 }
 
 static void device_colour_hook(char const *context, ReplxxColor *colours, int size, void *ud)
@@ -216,6 +219,8 @@ static void device_colour_hook(char const *context, ReplxxColor *colours, int si
     device_parse_t *current;
     apr_status_t status;
     int i;
+
+    device_save_termios();
 
     if (APR_SUCCESS != device_tokenize_to_argv(context, &args, &offsets, &states, &state, &error, d->tpool)) {
 
@@ -300,6 +305,7 @@ static void device_colour_hook(char const *context, ReplxxColor *colours, int si
 
     apr_pool_clear(d->tpool);
 
+    device_restore_termios();
 }
 
 static const char *device_prompt(device_t *d)

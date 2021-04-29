@@ -7,9 +7,6 @@
 /* Define to 1 if you have the <editline.h> header file. */
 /* #undef HAVE_EDITLINE_H */
 
-/* Define to 1 if you have the `getopt' function. */
-#define HAVE_GETOPT 1
-
 /* Define to 1 if you have the <histedit.h> header file. */
 #define HAVE_HISTEDIT_H 1
 
@@ -58,6 +55,12 @@
 
 /* Define to 1 if you have the <sys/types.h> header file. */
 #define HAVE_SYS_TYPES_H 1
+
+/* Define to 1 if you have the `tcgetattr' function. */
+#define HAVE_TCGETATTR 1
+
+/* Define to 1 if you have the <termios.h> header file. */
+#define HAVE_TERMIOS_H 1
 
 /* Define to 1 if you have the <unistd.h> header file. */
 #define HAVE_UNISTD_H 1

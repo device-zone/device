@@ -49,6 +49,8 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
     apr_status_t status;
     int i;
 
+    device_save_termios();
+
     if (APR_SUCCESS != device_tokenize_to_argv(context, &args, &offsets, &states, &state, &error, d->tpool)) {
 
         /* do nothing */
@@ -137,6 +139,7 @@ static void device_completion_hook(char const *context, linenoiseCompletions *lc
 
     apr_pool_clear(d->tpool);
 
+    device_restore_termios();
 }
 
 static const char *device_prompt(device_t *d)

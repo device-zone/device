@@ -32,7 +32,9 @@ getent group device >/dev/null || groupadd -r device
 
 %files
 %{_bindir}/device
+%{_sbindir}/device-*
 %{_mandir}/man1/device.1*
+%{_mandir}/man8/device-*.8*
 %attr(2775,root,device) %{_sysconfdir}/device
 %attr(0775,root,root) %{_libexecdir}/device
 %{_datadir}/bash-completion/completions/device

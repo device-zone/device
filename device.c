@@ -23,7 +23,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <apr_escape.h>
 #include <apr_file_io.h>
 #include <apr_file_info.h>
 #include <apr_general.h>
@@ -42,6 +41,7 @@
 #include "device_read.h"
 #include "device_replxx.h"
 #include "device_libedit.h"
+#include "device_util.h"
 
 #if HAVE_TERMIOS_H
 #include <termios.h>
@@ -829,47 +829,6 @@ apr_status_t device_tokenize_to_argv(const char *arg_str, const char ***argv_out
     argv[argnum] = NULL;
 
     return APR_SUCCESS;
-}
-
-const char *device_pescape_shell(apr_pool_t *p, const char *str)
-{
-
-     str = apr_pescape_shell(p, str);
-
-     if (str) {
-          int i;
-          int count = 0;
-
-          /* count spaces */
-          for (i = 0; str[i]; i++) {
-               if (str[i] == ' ') {
-                    count++;
-               }
-          }
-
-          /* escape spaces */
-          if (count) {
-
-               char *d;
-              const char *s;
-
-              s = str;
-              d = apr_palloc(p, strlen(str) + count + 1);
-              str = d;
-
-            for (; *s; ++s) {
-                 if (*s == ' ') {
-                      *d++ = '\\';
-                 }
-                  *d++ = *s;
-            }
-
-            *d = 0;
-
-          }
-     }
-
-     return str;
 }
 
 #if HAVE_TCGETATTR

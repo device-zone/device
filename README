@@ -1,0 +1,11 @@
+
+
+device - default shell
+
+device-add - add an instance directory by name or optional number, run nested (set) command
+device-move
+device-remove - remove an instance directory by name or number
+device-set - set a series of name value pairs
+
+
+device-get - ??? get a series of name value pairs, used to create print

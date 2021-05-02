@@ -236,7 +236,10 @@ device_completion_hook(EditLine *el, int ch __attribute__((__unused__)))
         }
         else if (current->type == DEVICE_PARSE_PARAMETER) {
 
-            if (current->p.key && current->offset->equals > -1) {
+            if (current->p.error) {
+                /* error, print nothing */
+            }
+            else if (current->p.key && current->offset->equals > -1) {
                 if (current->p.value[0]) {
 
                     apr_size_t len = lf->cursor - lf->buffer;

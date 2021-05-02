@@ -207,7 +207,10 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
         }
         else if (current->type == DEVICE_PARSE_PARAMETER) {
 
-            if (current->p.key && current->offset->equals > -1) {
+            if (current->p.error) {
+                /* error, print nothing */
+            }
+            else if (current->p.key && current->offset->equals > -1) {
                 if (current->p.value[0]) {
                     replxx_add_completion(lc,
                             apr_pstrcat(pool, device_pescape_shell(pool, current->name),

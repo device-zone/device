@@ -23,12 +23,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <apr.h>
 #include <apr_file_io.h>
 #include <apr_file_info.h>
 #include <apr_general.h>
 #include <apr_getopt.h>
 #include <apr_lib.h>
 #include <apr_network_io.h>
+#include <apr_poll.h>
 #include <apr_strings.h>
 #include <apr_thread_proc.h>
 
@@ -1156,6 +1158,119 @@ device_parse_t* device_command_make(device_parse_t *dp, const char *libexec,
     return dp;
 }
 
+static apr_status_t cleanup_realloc(void *dummy)
+{
+    if (dummy) {
+        free(dummy);
+    }
+
+    return APR_SUCCESS;
+}
+
+typedef enum device_proc_std_e {
+    DEVICE_PROC_STDOUT = 1,
+    DEVICE_PROC_STDERR = 2,
+} device_proc_std_e;
+
+static apr_status_t device_proc_gets(apr_pool_t *pool, apr_proc_t *proc, char *buf,
+    apr_size_t *buflen, device_proc_std_e *what)
+{
+    apr_pool_t *p;
+    apr_status_t status;
+    apr_pollfd_t pfd = {0};
+    apr_pollset_t *pollset;
+    int fds_waiting;
+
+    apr_pool_create(&p, pool);
+
+    if (APR_SUCCESS != (status = apr_pollset_create(&pollset, 2, p, 0))) {
+        return status;
+    }
+
+    fds_waiting = 0;
+
+    pfd.p = pool;
+    pfd.desc_type = APR_POLL_FILE;
+    pfd.reqevents = APR_POLLIN;
+
+    if (proc->err) {
+        pfd.desc.f = proc->err;
+        if (APR_SUCCESS != (status = apr_pollset_add(pollset, &pfd))) {
+            apr_pool_destroy(p);
+            return status;
+        }
+        fds_waiting++;
+    }
+
+    if (proc->out) {
+        pfd.desc.f = proc->out;
+        if (APR_SUCCESS != (status = apr_pollset_add(pollset, &pfd))) {
+            apr_pool_destroy(p);
+            return status;
+        }
+        fds_waiting++;
+    }
+
+    while (fds_waiting) {
+        int i, num_events;
+        const apr_pollfd_t *pdesc;
+
+        status = apr_pollset_poll(pollset, -1, &num_events, &pdesc);
+        if (status != APR_SUCCESS && !APR_STATUS_IS_EINTR(status)) {
+            break;
+        }
+
+        for (i = 0; i < num_events; i++) {
+
+            if (pdesc[i].desc.f == proc->out) {
+
+                status = apr_file_gets(buf, *buflen, proc->out);
+                if (APR_STATUS_IS_EOF(status)) {
+                    apr_file_close(proc->out);
+                    proc->out = NULL;
+                    apr_pollset_remove(pollset, &pdesc[i]);
+                    --fds_waiting;
+                }
+                else if (status != APR_SUCCESS) {
+                    apr_pool_destroy(p);
+                    return status;
+                }
+                else {
+                    apr_pool_destroy(p);
+                    *what = DEVICE_PROC_STDOUT;
+                    return APR_SUCCESS;
+                }
+
+            }
+
+            else if (pdesc[i].desc.f == proc->err) {
+
+                status = apr_file_read(proc->err, buf, buflen);
+                if (APR_STATUS_IS_EOF(status)) {
+                    apr_file_close(proc->err);
+                    proc->err = NULL;
+                    apr_pollset_remove(pollset, &pdesc[i]);
+                    --fds_waiting;
+                }
+                else if (status != APR_SUCCESS) {
+                    apr_pool_destroy(p);
+                    return status;
+                }
+                else {
+                    *what = DEVICE_PROC_STDERR;
+                    apr_pool_destroy(p);
+                    return APR_SUCCESS;
+                }
+
+            }
+
+        }
+    }
+
+    apr_pool_destroy(p);
+    return APR_EOF;
+}
+
 device_parse_t *device_parameter_make(device_parse_t *dp,
         const char *name, device_offset_t *offset, device_parse_t *command, const char **env)
 {
@@ -1180,6 +1295,9 @@ device_parse_t *device_parameter_make(device_parse_t *dp,
     dp->p.keys = apr_array_make(dp->pool, 1, sizeof(device_name_t));
     dp->p.requires = apr_array_make(dp->pool, 1, sizeof(device_name_t));
     dp->p.values = apr_array_make(dp->pool, 1, sizeof(device_name_t));
+    dp->p.error = NULL;
+    dp->p.stderr = NULL;
+    dp->p.stderrlen = 0;
 
     if (offset) {
         if (offset->equals > -1) {
@@ -1248,27 +1366,27 @@ device_parse_t *device_parameter_make(device_parse_t *dp,
         return dp;
     }
 
-    if ((status = apr_procattr_child_in_set(procattr, NULL, NULL)) != APR_SUCCESS) {
-        dp->p.error = apr_psprintf(dp->pool, "cannot set stdin: %pm\n", &status);
-        return dp;
-    }
+//    if ((status = apr_procattr_child_in_set(procattr, NULL, NULL)) != APR_SUCCESS) {
+//        dp->p.error = apr_psprintf(dp->pool, "cannot set stdin: %pm\n", &status);
+//        return dp;
+//    }
 
     //        if ((status = apr_procattr_child_out_set(procattr, &iowrite, &ioread)) != APR_SUCCESS) {
-    if ((status = apr_procattr_child_out_set(procattr, NULL, NULL)) != APR_SUCCESS) {
-        dp->p.error = apr_psprintf(dp->pool, "cannot set out pipe: %pm\n", &status);
+//    if ((status = apr_procattr_child_out_set(procattr, NULL, NULL)) != APR_SUCCESS) {
+//        dp->p.error = apr_psprintf(dp->pool, "cannot set out pipe: %pm\n", &status);
+//        return dp;
+//    }
+
+//    if ((status = apr_procattr_child_err_set(procattr, NULL, NULL)) != APR_SUCCESS) {
+//        dp->p.error = apr_psprintf(dp->pool, "cannot set stderr: %pm\n", &status);
+//        return dp;
+//    }
+
+    if ((status = apr_procattr_io_set(procattr, APR_CHILD_BLOCK, APR_CHILD_BLOCK,
+            APR_CHILD_BLOCK)) != APR_SUCCESS) {
+        dp->p.error = apr_psprintf(dp->pool, "cannot set io procattr: %pm\n", &status);
         return dp;
     }
-
-    if ((status = apr_procattr_child_err_set(procattr, NULL, NULL)) != APR_SUCCESS) {
-        dp->p.error = apr_psprintf(dp->pool, "cannot set stderr: %pm\n", &status);
-        return dp;
-    }
-
-//        if ((status = apr_procattr_io_set(procattr, APR_NO_PIPE, APR_FULL_BLOCK,
-//                APR_NO_PIPE)) != APR_SUCCESS) {
-//        dp->p.error = apr_psprintf(dp->pool, "cannot set io procattr: %pm\n", &status);
-//            break;
-//        }
 
     if ((status = apr_procattr_dir_set(procattr, command->r.sysconf))
             != APR_SUCCESS) {
@@ -1289,16 +1407,28 @@ device_parse_t *device_parameter_make(device_parse_t *dp,
     }
 
     apr_file_close(proc->in);
-    apr_file_close(proc->err);
-//        apr_file_close(proc->out);
+    // apr_file_close(proc->err);
+    // apr_file_close(proc->out);
 
     /* read the results */
     while (1) {
         char buf[HUGE_STRING_LEN];
+        apr_size_t buflen = sizeof(buf);
         char *val = buf + 1;
+        device_proc_std_e what;
 
-        if (APR_SUCCESS == (status = apr_file_gets(buf, sizeof(buf), proc->out))) {
+        if (APR_SUCCESS == (status = device_proc_gets(dp->pool, proc, buf, &buflen, &what))) {
 
+            /* handle stderr... */
+            if (what == DEVICE_PROC_STDERR) {
+                dp->p.stderr = realloc(dp->p.stderr, dp->p.stderrlen + buflen);
+                memcpy(dp->p.stderr + dp->p.stderrlen, buf, buflen);
+                dp->p.stderrlen += buflen;
+
+                continue;
+            }
+
+            /* ...otherwise we deal with stdout */
             if (overflow > 0) {
 
                 const char **args;
@@ -1419,7 +1549,12 @@ device_parse_t *device_parameter_make(device_parse_t *dp,
 
     }
 
-    apr_file_close(proc->out);
+    if (dp->p.stderr) {
+        apr_pool_cleanup_register(dp->pool, dp->p.stderr, cleanup_realloc,
+                apr_pool_cleanup_null);
+    }
+
+    // apr_file_close(proc->out);
 
     if ((status = apr_proc_wait(proc, &exitcode, &exitwhy, APR_WAIT)) != APR_CHILD_DONE) {
         dp->p.error = apr_psprintf(dp->pool, "cannot wait for command: %pm\n", &status);

@@ -90,7 +90,10 @@ device_completion_hook(char *token, int *match)
         }
         else if (current->type == DEVICE_PARSE_PARAMETER) {
 
-            if (current->p.key && current->offset->equals > -1) {
+            if (current->p.error) {
+                /* error, print nothing */
+            }
+            else if (current->p.key && current->offset->equals > -1) {
                 if (current->p.value[0]) {
 
                     /* unique */
@@ -238,7 +241,10 @@ device_list_possible_hook(char *token, char ***av)
         }
         else if (current->type == DEVICE_PARSE_PARAMETER) {
 
-            if (current->p.key && current->offset->equals > -1) {
+            if (current->p.error) {
+                /* error, print nothing */
+            }
+            else if (current->p.key && current->offset->equals > -1) {
                 if (current->p.value[0]) {
 
                     count = 1;

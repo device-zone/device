@@ -65,6 +65,8 @@ typedef struct device_parameter_t {
     apr_array_header_t *values;
     device_parse_t *command;
     const char *error;
+    char *stderr;
+    apr_size_t stderrlen;
     int required;
 } device_parameter_t;
 

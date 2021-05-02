@@ -412,11 +412,11 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
 
                 const char **opt = apr_array_push(options);
 
-				opt[0] = apr_pstrcat(ds->pool,
-						pair->optional == DEVICE_OPTIONAL ? "-" : "*",
-						device_pescape_shell(ds->pool, pair->key), "=",
-						device_pescape_shell(ds->pool, buffer),
-						NULL);
+                opt[0] = apr_pstrcat(ds->pool,
+                        pair->optional == DEVICE_OPTIONAL ? "-" : "*",
+                        device_pescape_shell(ds->pool, pair->key), "=",
+                        device_pescape_shell(ds->pool, buffer),
+                        NULL);
 
                 if (option) {
                     option[0] = possible[0];
@@ -464,7 +464,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
     apr_status_t status;
 
     if (!args[0]) {
-    	/* no args is ok */
+        /* no args is ok */
     }
     else if (!args[1]) {
         key = args[0];
@@ -522,22 +522,22 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
     }
     else {
 
-    	apr_hash_index_t *hi;
-    	void *v;
-    	device_pair_t *pair;
+        apr_hash_index_t *hi;
+        void *v;
+        device_pair_t *pair;
 
-    	for (hi = apr_hash_first(ds->pool, ds->pairs); hi; hi = apr_hash_next(hi)) {
+        for (hi = apr_hash_first(ds->pool, ds->pairs); hi; hi = apr_hash_next(hi)) {
 
-    		apr_hash_this(hi, NULL, NULL, &v);
-    		pair = v;
+            apr_hash_this(hi, NULL, NULL, &v);
+            pair = v;
 
-			if (!key || !key[0] || !strncmp(key, pair->key, strlen(key))) {
-				apr_file_printf(ds->out, "%c%s=\n",
-						pair->optional == DEVICE_OPTIONAL ? '-' : '*',
-						device_pescape_shell(ds->pool, pair->key));
-			}
+            if (!key || !key[0] || !strncmp(key, pair->key, strlen(key))) {
+                apr_file_printf(ds->out, "%c%s=\n",
+                        pair->optional == DEVICE_OPTIONAL ? '-' : '*',
+                        device_pescape_shell(ds->pool, pair->key));
+            }
 
-    	}
+        }
 
         status = APR_EINVAL;
 
@@ -575,8 +575,8 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
             break;
         }
         else if (APR_SUCCESS
-				!= (status = apr_file_perms_set(file->template,
-						APR_FPROT_OS_DEFAULT & ~DEVICE_FILE_UMASK))) {
+                != (status = apr_file_perms_set(file->template,
+                        APR_FPROT_OS_DEFAULT & ~DEVICE_FILE_UMASK))) {
             apr_file_printf(ds->err, "cannot set permissions on '%s': %pm\n", file->key, &status);
             break;
         }

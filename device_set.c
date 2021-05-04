@@ -39,6 +39,8 @@
 #define DEVICE_FQDN 259
 #define DEVICE_SELECT 260
 #define DEVICE_BYTES 261
+#define DEVICE_BYTES_MIN 262
+#define DEVICE_BYTES_MAX 263
 
 #define DEVICE_TXT ".txt"
 
@@ -647,20 +649,26 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
     const char *key = NULL, *value = NULL;
 
     apr_status_t status;
+    int count = 0;
 
     if (!args[0]) {
-        /* no args is ok */
-    }
-    else if (!args[1]) {
-        key = args[0];
-    }
-    else if (!args[2]) {
-        key = args[0];
-        value = args[1];
-    }
-    else {
-        apr_file_printf(ds->err, "complete needs two or less arguments.\n");
+        /* no args is not ok */
+        apr_file_printf(ds->err, "complete needs one or more arguments.\n");
         return APR_EINVAL;
+    }
+
+    /* find the last key/value pair, or just the key if odd */
+    while(args[count]) {
+        if (!args[count + 1]) {
+            key = args[count + 0];
+            value = NULL;
+            break;
+        }
+        else {
+            key = args[count + 0];
+            value = args[count + 1];
+        }
+        count += 2;
     }
 
     if (value) {

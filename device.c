@@ -1274,6 +1274,7 @@ static apr_status_t device_proc_gets(apr_pool_t *pool, apr_proc_t *proc, char *b
 device_parse_t *device_parameter_make(device_parse_t *dp,
         const char *name, device_offset_t *offset, device_parse_t *command, const char **env)
 {
+    device_parse_t *parent;
     apr_file_t *ioread, *iowrite;
     apr_array_header_t *argv;
     apr_procattr_t *procattr;
@@ -1287,6 +1288,7 @@ device_parse_t *device_parameter_make(device_parse_t *dp,
     int overflow = DEVICE_MAX_PARAMETERS;
     int exitcode = 0;
     apr_exit_why_e exitwhy = 0;
+    int i;
 
 
     dp->name = apr_pstrdup(dp->pool, name);
@@ -1315,14 +1317,41 @@ device_parse_t *device_parameter_make(device_parse_t *dp,
 
     /* run the command, make sure it parses */
 
+    /* go back and count the parameters */
+    parent = dp->parent;
+    while (parent->type == DEVICE_PARSE_PARAMETER) {
+        count++;
+        parent = parent->parent;
+    }
+
     /* go forward, create the arguments */
-    argv = apr_array_make(dp->pool, 4, sizeof(const char *));
+    argv = apr_array_make(dp->pool, count * 2 + 4, sizeof(const char *));
 
     arg = apr_array_push(argv);
     *arg = command->r.libexec;
 
     arg = apr_array_push(argv);
     *arg = "-c";
+
+    for (i = 0; i < count; i++) {
+        apr_array_push(argv);
+        apr_array_push(argv);
+    }
+
+    parent = dp->parent;
+    while (count) {
+
+        count--;
+
+        (APR_ARRAY_IDX(argv, (count * 2 + 2), const char *)) =
+                parent->p.key ? parent->p.key :
+                        parent->p.value ? parent->p.value : "";
+
+        (APR_ARRAY_IDX(argv, (count * 2 + 3), const char *)) =
+                parent->p.key && parent->p.value ? parent->p.value : "";
+
+        parent = parent->parent;
+    }
 
     if (dp->p.key) {
         arg = apr_array_push(argv);

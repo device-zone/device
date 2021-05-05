@@ -35,12 +35,13 @@
 #include "config.h"
 
 #define DEVICE_PORT 257
-#define DEVICE_HOSTNAME 258
-#define DEVICE_FQDN 259
-#define DEVICE_SELECT 260
-#define DEVICE_BYTES 261
-#define DEVICE_BYTES_MIN 262
-#define DEVICE_BYTES_MAX 263
+#define DEVICE_UNPRIVILEGED_PORT 258
+#define DEVICE_HOSTNAME 259
+#define DEVICE_FQDN 260
+#define DEVICE_SELECT 261
+#define DEVICE_BYTES 262
+#define DEVICE_BYTES_MIN 263
+#define DEVICE_BYTES_MAX 264
 
 #define DEVICE_TXT ".txt"
 
@@ -56,6 +57,8 @@ typedef struct device_set_t {
 
 #define DEVICE_PORT_MIN 0
 #define DEVICE_PORT_MAX 65535
+#define DEVICE_PORT_UNPRIVILEGED_MIN 1025
+#define DEVICE_PORT_UNPRIVILEGED_MAX 49151
 #define DEVICE_HOSTNAME_MIN 1
 #define DEVICE_HOSTNAME_MAX 63
 #define DEVICE_SELECT_MAX 80
@@ -64,6 +67,7 @@ typedef struct device_set_t {
 
 typedef enum device_pair_e {
     DEVICE_PAIR_PORT,
+    DEVICE_PAIR_UNPRIVILEGED_PORT,
     DEVICE_PAIR_HOSTNAME,
     DEVICE_PAIR_FQDN,
     DEVICE_PAIR_SELECT,
@@ -101,6 +105,7 @@ static const apr_getopt_option_t
     { "optional", 'o', 0, "  -o, --optional\t\tOptions declared after this are optional. This is the default." },
     { "required", 'r', 0, "  -r, --required\t\tOptions declared after this are required." },
     { "port", DEVICE_PORT, 1, "  --port\t\t\tParse a port. Ports are integers in the range\n\t\t\t\t0 to 65535." },
+    { "unprivileged-port", DEVICE_UNPRIVILEGED_PORT, 1, "  --unprivileged-port\t\tParse an unprivileged port. Unprivileged ports are integers in the range\n\t\t\t\t1025 to 49151." },
     { "hostname", DEVICE_HOSTNAME, 1, "  --hostname\t\t\tParse a hostname. Hostnames consist of the\n\t\t\t\tcharacters a-z, 0-9, or a hyphen. Hostname\n\t\t\t\tcannot start with a hyphen." },
     { "fqdn", DEVICE_FQDN, 1, "  --fqdn\t\t\tParse a fully qualified domain name. FQDNs\n\t\t\t\tconsist of labels containing the characters\n\t\t\t\ta-z, 0-9, or a hyphen, and cannot start with\n\t\t\t\ta hyphen. Labels are separated by dots, and\n\t\t\t\tthe total length cannot exceed 253 characters." },
     { "select", DEVICE_SELECT, 1, "  --select\t\t\tParse a selection from a file containing\n\t\t\t\toptions. The file containing options is\n\t\t\t\tsearched relative to the base path, and has\n\t\t\t\tthe same name as the result file. Unambiguous\n\t\t\t\tprefix matches are accepted." },
@@ -198,6 +203,30 @@ static apr_status_t device_parse_port(device_set_t *ds, device_pair_t *pair,
     apr_int64_t port = apr_strtoi64(arg, &end, 10);
     if (end[0] || port < DEVICE_PORT_MIN || port > DEVICE_PORT_MAX) {
         apr_file_printf(ds->err, "argument '%s': '%s' is not a valid port.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1),
+                apr_pescape_echo(ds->pool, arg, 1));
+        return APR_EINVAL;
+    }
+    return APR_SUCCESS;
+}
+
+/*
+ * Port is an integer between 1025 and 49151 inclusive.
+ */
+static apr_status_t device_parse_unprivileged_port(device_set_t *ds,
+        device_pair_t *pair, const char *arg)
+{
+    char *end;
+
+    if (!arg || !arg[0]) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    apr_int64_t port = apr_strtoi64(arg, &end, 10);
+    if (end[0] || port < DEVICE_PORT_UNPRIVILEGED_MIN || port > DEVICE_PORT_UNPRIVILEGED_MAX) {
+        apr_file_printf(ds->err, "argument '%s': '%s' is not a valid unprivileged port.\n",
                 apr_pescape_echo(ds->pool, pair->key, 1),
                 apr_pescape_echo(ds->pool, arg, 1));
         return APR_EINVAL;
@@ -849,6 +878,9 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
             case DEVICE_PAIR_PORT:
                 status = device_parse_port(ds, pair, val);
                 break;
+            case DEVICE_PAIR_UNPRIVILEGED_PORT:
+                status = device_parse_unprivileged_port(ds, pair, val);
+                break;
             case DEVICE_PAIR_HOSTNAME:
                 status = device_parse_hostname(ds, pair, val);
                 break;
@@ -963,6 +995,19 @@ int main(int argc, const char * const argv[])
             device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
 
             pair->type = DEVICE_PAIR_PORT;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT;
+            pair->optional = optional;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_UNPRIVILEGED_PORT: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_UNPRIVILEGED_PORT;
             pair->key = optarg;
             pair->suffix = DEVICE_TXT;
             pair->optional = optional;

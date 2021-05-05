@@ -2299,11 +2299,13 @@ apr_status_t device_command(device_t *d, const char **args,
         }
 
         if (exitcode != 0 || exitwhy != APR_PROC_EXIT) {
-            apr_file_printf(d->err, "command exited %s with code %d\n",
-                    exitwhy == APR_PROC_EXIT ? "normally" :
-                            exitwhy == APR_PROC_SIGNAL ? "on signal" :
-                                    exitwhy == APR_PROC_SIGNAL_CORE ? "and dumped core" :
-                                            "", exitcode);
+            if (exitwhy != APR_PROC_EXIT) {
+                apr_file_printf(d->err, "command exited %s with code %d\n",
+                        exitwhy == APR_PROC_EXIT ? "normally" :
+                        exitwhy == APR_PROC_SIGNAL ? "on signal" :
+                        exitwhy == APR_PROC_SIGNAL_CORE ? "and dumped core" : "",
+                        exitcode);
+            }
             status = APR_EGENERAL;
             break;
         }

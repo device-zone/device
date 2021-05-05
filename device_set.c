@@ -715,6 +715,9 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             case DEVICE_PAIR_PORT:
                 status = device_parse_port(ds, pair, value);
                 break;
+            case DEVICE_PAIR_UNPRIVILEGED_PORT:
+                status = device_parse_unprivileged_port(ds, pair, value);
+                break;
             case DEVICE_PAIR_HOSTNAME:
                 status = device_parse_hostname(ds, pair, value);
                 break;

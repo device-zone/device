@@ -1271,8 +1271,9 @@ static apr_status_t device_proc_gets(apr_pool_t *pool, apr_proc_t *proc, char *b
     return APR_EOF;
 }
 
-device_parse_t *device_parameter_make(device_parse_t *dp,
-        const char *name, device_offset_t *offset, device_parse_t *command, const char **env)
+device_parse_t* device_parameter_make(device_parse_t *dp, const char *name,
+        device_offset_t *offset, device_parse_t *command, const char **env,
+        int completion)
 {
     device_parse_t *parent;
     apr_file_t *ioread, *iowrite;
@@ -1305,13 +1306,29 @@ device_parse_t *device_parameter_make(device_parse_t *dp,
         if (offset->equals > -1) {
             dp->p.key = apr_pstrndup(dp->pool, name, offset->equals);
             dp->p.value = apr_pstrdup(dp->pool, name + offset->equals + 1);
+            if (strchr(dp->p.key, '=')) {
+                dp->p.error = apr_psprintf(dp->pool,
+                        "key contains a hidden equals character.\n");
+                return dp;
+            }
         }
         else {
             dp->p.value = dp->name;
         }
     }
     else {
-        /* no offset, no ability to sanity check command */
+        const char *equals;
+        if ((equals = strchr(name, '='))) {
+            dp->p.key = apr_pstrndup(dp->pool, name, equals - name);
+            dp->p.value = apr_pstrdup(dp->pool, equals + 1);
+        }
+        else {
+            dp->p.value = dp->name;
+        }
+    }
+
+    if (!completion) {
+        /* skip the sanity check command */
         return dp;
     }
 
@@ -1620,8 +1637,8 @@ device_parse_t *device_option_make(device_parse_t *dp,
     return dp;
 }
 
-apr_status_t device_parse(device_t *d, const char *arg,
-        device_offset_t *offset, device_parse_t *parent, device_parse_t **result)
+apr_status_t device_parse(device_t *d, const char *arg, device_offset_t *offset,
+        device_parse_t *parent, int completion, device_parse_t **result)
 {
     const device_name_t *name;
     device_parse_t *current;
@@ -1717,7 +1734,7 @@ apr_status_t device_parse(device_t *d, const char *arg,
         const char **env = device_environment_make(d);
 
         *result = current = device_parameter_make(device_parse_make(parent->pool, parent), arg,
-                offset, parent, env);
+                offset, parent, env, completion);
 
         break;
     }
@@ -1726,7 +1743,7 @@ apr_status_t device_parse(device_t *d, const char *arg,
         const char **env = device_environment_make(d);
 
         *result = current = device_parameter_make(device_parse_make(parent->pool, parent), arg,
-                offset, parent->p.command, env);
+                offset, parent->p.command, env, completion);
 
         break;
     }
@@ -1909,7 +1926,7 @@ apr_status_t device_colourise(device_t *d, const char **args,
     {
         const char *arg = APR_ARRAY_IDX(d->args, i, const char *);
 
-        if (APR_SUCCESS != (status = device_parse(d, arg, NULL, current, &current))) {
+        if (APR_SUCCESS != (status = device_parse(d, arg, NULL, current, 0, &current))) {
 
             /* no complete */
             apr_pool_destroy(first->pool);
@@ -1933,7 +1950,7 @@ apr_status_t device_colourise(device_t *d, const char **args,
         }
 
         if (APR_SUCCESS != (status =
-                device_parse(d, arg, offsets, current, &current))) {
+                device_parse(d, arg, offsets, current, 1, &current))) {
 
             /* this is as far as we can go, ignore everything past this*/
             break;
@@ -1988,7 +2005,7 @@ apr_status_t device_complete(device_t *d, const char **args,
     {
         const char *arg = APR_ARRAY_IDX(d->args, i, const char *);
 
-        if (APR_SUCCESS != (status = device_parse(d, arg, NULL, current, &current))) {
+        if (APR_SUCCESS != (status = device_parse(d, arg, NULL, current, 1, &current))) {
 
             /* no complete */
             apr_pool_destroy(first->pool);
@@ -2012,7 +2029,7 @@ apr_status_t device_complete(device_t *d, const char **args,
         }
 
         if (APR_SUCCESS != (status =
-                device_parse(d, arg, offsets, current, &current))) {
+                device_parse(d, arg, offsets, current, 1, &current))) {
 
             /* no complete */
             apr_pool_destroy(first->pool);
@@ -2029,7 +2046,7 @@ apr_status_t device_complete(device_t *d, const char **args,
     if (state.intoken == DEVICE_TOKEN_OUTSIDE) {
         device_offset_t offset = { NULL, 0, 0, -1, 0 };
 
-        if (APR_SUCCESS != (status = device_parse(d, "", &offset, current, &current))) {
+        if (APR_SUCCESS != (status = device_parse(d, "", &offset, current, 1, &current))) {
 
             apr_pool_destroy(first->pool);
             return status;
@@ -2037,232 +2054,8 @@ apr_status_t device_complete(device_t *d, const char **args,
 
     }
 
-#if 0
-    /* where did we land? */
-    switch (current->type) {
-    case DEVICE_PARSE_PARAMETER: {
-
-        apr_file_t *ioread, *iowrite;
-        device_parse_t *command;
-        apr_array_header_t *argv;
-        apr_procattr_t *procattr;
-        apr_proc_t *proc;
-        apr_array_header_t *keys, *values;
-        const char **arg;
-        device_name_t *result;
-        apr_finfo_t finfo;
-        int skip = 0;
-        int count = 0;
-        int overflow = DEVICE_MAX_PARAMETERS;
-
-        /* go back and find the command */
-        command = current->p.command;
-
-        /* go forward, create the arguments */
-        argv = apr_array_make(first->pool, 4, sizeof(const char *));
-
-        arg = apr_array_push(argv);
-        *arg = command->r.libexec;
-
-        arg = apr_array_push(argv);
-        *arg = "-c";
-
-        if (current->p.key) {
-            arg = apr_array_push(argv);
-            *arg = current->p.key;
-
-            arg = apr_array_push(argv);
-            *arg = current->p.value;
-        }
-        else {
-            arg = apr_array_push(argv);
-            *arg = current->name;
-        }
-
-        apr_array_push(argv);
-
-        /* sanity check - is sysconf a directory? */
-        if ((status = apr_stat(&finfo, command->r.sysconf, APR_FINFO_TYPE, command->pool))) {
-            apr_file_printf(d->err, "cannot stat sysconfdir: %pm\n", &status);
-            break;
-        }
-        else if (finfo.filetype != APR_DIR) {
-            apr_file_printf(d->err, "sysconfdir not a directory\n");
-            break;
-        }
-
-        if ((status = apr_procattr_create(&procattr, first->pool)) != APR_SUCCESS) {
-            apr_file_printf(d->err, "cannot create procattr: %pm\n", &status);
-            break;
-        }
-
-//        if ((status = apr_procattr_detach_set(procattr, 1))
-//                != APR_SUCCESS) {
-//            apr_file_printf(d->err, "cannot set detached in procattr: %pm\n", &status);
-//            break;
-//        }
-
-
-        if ((status = apr_file_pipe_create_ex(&ioread, &iowrite, APR_FULL_BLOCK,
-                first->pool)) != APR_SUCCESS) {
-            apr_file_printf(d->err, "cannot create pipes: %pm\n", &status);
-            break;
-        }
-
-        if ((status = apr_procattr_child_in_set(procattr, NULL, NULL)) != APR_SUCCESS) {
-            apr_file_printf(d->err, "cannot set stdin: %pm\n", &status);
-            break;
-        }
-
-        //        if ((status = apr_procattr_child_out_set(procattr, &iowrite, &ioread)) != APR_SUCCESS) {
-        if ((status = apr_procattr_child_out_set(procattr, NULL, NULL)) != APR_SUCCESS) {
-            apr_file_printf(d->err, "cannot set out pipe: %pm\n", &status);
-            break;
-        }
-
-        if ((status = apr_procattr_child_err_set(procattr, NULL, NULL)) != APR_SUCCESS) {
-            apr_file_printf(d->err, "cannot set stderr: %pm\n", &status);
-            break;
-        }
-
-//        if ((status = apr_procattr_io_set(procattr, APR_NO_PIPE, APR_FULL_BLOCK,
-//                APR_NO_PIPE)) != APR_SUCCESS) {
-//            apr_file_printf(d->err, "cannot set io procattr: %pm\n", &status);
-//            break;
-//        }
-
-        if ((status = apr_procattr_dir_set(procattr, command->r.sysconf))
-                != APR_SUCCESS) {
-            apr_file_printf(d->err, "cannot set directory in procattr: %pm\n", &status);
-            break;
-        }
-
-        if ((status = apr_procattr_cmdtype_set(procattr, APR_PROGRAM)) != APR_SUCCESS) {
-            apr_file_printf(d->err, "cannot set command type in procattr: %pm\n", &status);
-            break;
-        }
-
-        proc = apr_pcalloc(first->pool, sizeof(apr_proc_t));
-        if ((status = apr_proc_create(proc, command->r.libexec, (const char* const*) argv->elts,
-                device_environment_make(d), procattr, first->pool)) != APR_SUCCESS) {
-            apr_file_printf(d->err, "cannot run command: %pm\n", &status);
-            break;
-        }
-
-        apr_file_close(proc->in);
-        apr_file_close(proc->err);
-//        apr_file_close(proc->out);
-
-        /* read the results */
-        keys = apr_array_make(current->pool, 1, sizeof(device_name_t));
-        values = apr_array_make(current->pool, 1, sizeof(device_name_t));
-
-        while (1) {
-            char buf[HUGE_STRING_LEN];
-
-            if (APR_SUCCESS == (status = apr_file_gets(buf, sizeof(buf), proc->out))) {
-
-                if (overflow > 0) {
-
-                    int len = strlen(buf);
-
-                    /* silently ignore lines that are too long */
-                    if (len && buf[len - 1] != '\n') {
-                        skip = 1;
-                        continue;
-                    }
-                    else if (skip) {
-                        skip = 0;
-                    }
-                    else {
-
-                        char *equals = strrchr(buf, '=');
-
-                        if (current->p.key) {
-                            result = apr_array_push(values);
-
-                            result->size = len - 1;
-                            result->name = apr_pstrndup(current->pool, buf, result->size);
-                        }
-                        else {
-                            if (equals) {
-                                result = apr_array_push(keys);
-
-                                result->size = equals - buf;
-                                result->name = apr_pstrndup(current->pool, buf, result->size);
-                            }
-                            else {
-                                result = apr_array_push(values);
-
-                                result->size = len - 1;
-                                result->name = apr_pstrndup(current->pool, buf, result->size);
-                            }
-                        }
-
-                        count++;
-                    }
-
-                }
-                else {
-                    /* no more, bail out */
-                    apr_file_printf(d->err,
-                            "more than %d parameters read, not completing.\n",
-                            DEVICE_MAX_PARAMETERS);
-                    break;
-                }
-
-                overflow--;
-            }
-            else if (APR_EOF == status) {
-                break;
-            }
-            else {
-                apr_file_printf(d->err, "cannot read from command: %pm\n", &status);
-                break;
-            }
-
-        }
-
-        if (APR_EOF == status) {
-
-            char *common = NULL;
-
-            if (current->p.key) {
-
-                device_find_prefixes(keys, current->name, current->a.keys, &common);
-            }
-            else {
-
-                device_find_prefixes(values, current->name, current->a.values, &common);
-            }
-            device_ambiguous_make(current, current->name);
-
-
-            current->a.prefix = apr_pstrdup(current->pool, current->name);
-            current->a.common = common;
-
-        }
-
-        apr_file_close(proc->out);
-
-        if ((status = apr_proc_wait(proc, NULL, NULL, APR_WAIT)) != APR_CHILD_DONE) {
-            apr_file_printf(d->err, "cannot wait for command: %pm\n", &status);
-            break;
-        }
-
-        break;
-    }
-    default:
-        break;
-    }
-
-#endif
-
     *result = current;
     *pool = first->pool;
-
-//    apr_file_printf(d->out, "test out: %pm\n", &status);
-//    apr_file_printf(d->err, "test err: %pm\n", &status);
 
     return APR_SUCCESS;
 }
@@ -2307,7 +2100,8 @@ apr_status_t device_command(device_t *d, const char **args,
     {
         const char *arg = APR_ARRAY_IDX(d->args, i, const char *);
 
-        if (APR_SUCCESS != (status = device_parse(d, arg, NULL, current, &current))) {
+        if (APR_SUCCESS
+                != (status = device_parse(d, arg, NULL, current, 0, &current))) {
 
             apr_file_printf(d->err, "bad saved command\n");
             apr_pool_destroy(first->pool);
@@ -2329,7 +2123,7 @@ apr_status_t device_command(device_t *d, const char **args,
 
         /* parse the token */
         if (APR_SUCCESS != (status =
-                device_parse(d, arg, NULL, current, &current))) {
+                device_parse(d, arg, offsets, current, 0, &current))) {
 
             if (offsets) {
                 apr_file_printf(d->err, "bad command '%s' (line %" APR_SIZE_T_FMT
@@ -2401,13 +2195,13 @@ apr_status_t device_command(device_t *d, const char **args,
 
         /* go back and find the command */
         command = current;
-        while (command->type != DEVICE_PARSE_COMMAND) {
+        while (command->type == DEVICE_PARSE_PARAMETER) {
             count++;
             command = command->parent;
         }
 
         /* go forward, create the arguments */
-        argv = apr_array_make(first->pool, count + 3, sizeof(const char *));
+        argv = apr_array_make(first->pool, count * 2 + 3, sizeof(const char *));
 
         arg = apr_array_push(argv);
         *arg = command->r.libexec;
@@ -2417,6 +2211,7 @@ apr_status_t device_command(device_t *d, const char **args,
 
         for (i = 0; i < count; i++) {
             apr_array_push(argv);
+            apr_array_push(argv);
         }
         apr_array_push(argv);
 
@@ -2424,7 +2219,12 @@ apr_status_t device_command(device_t *d, const char **args,
 
             count--;
 
-            (APR_ARRAY_IDX(argv, (count + 2), const char *)) = current->name;
+            (APR_ARRAY_IDX(argv, (count * 2 + 2), const char *)) =
+                    current->p.key ? current->p.key :
+                            current->p.value ? current->p.value : "";
+
+            (APR_ARRAY_IDX(argv, (count * 2 + 3), const char *)) =
+                    current->p.key && current->p.value ? current->p.value : "";
 
             current = current->parent;
         }

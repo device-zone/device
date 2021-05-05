@@ -735,7 +735,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
 
         }
 
-        status = APR_EINVAL;
+        status = APR_INCOMPLETE;
 
     }
 
@@ -816,6 +816,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
 static apr_status_t device_set(device_set_t *ds, const char **args)
 {
+    const char *key = NULL, *val = NULL;
     apr_status_t status = APR_SUCCESS;
     int len;
 
@@ -828,30 +829,21 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
         device_file_t *file;
         const char *arg = *(args++);
         device_pair_t *pair;
-        const char *equals = strchr(arg, '=');
-        const char *key, *val;
-        apr_size_t klen;
 
-
-        if (equals) {
-            klen = equals - arg;
-            key = apr_pstrndup(ds->pool, arg, klen);
-            val = equals + 1;
+        if (!key) {
+            key = arg;
+            continue;
         }
         else {
-            // FIXME: add option for an "overflow" of unknown arguments
-            apr_file_printf(ds->err,
-                    "argument '%s' is not a name/value pair.\n",
-                    apr_pescape_echo(ds->pool, arg, 1));
-            continue;
+            val = arg;
         }
 
         /* look up the parameter */
-        pair = apr_hash_get(ds->pairs, key, klen);
+        pair = apr_hash_get(ds->pairs, key, APR_HASH_KEY_STRING);
 
         if (pair) {
 
-            apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+            apr_array_header_t *options = apr_array_make(ds->pool, (len / 2), sizeof(char *));
 
             switch (pair->type) {
             case DEVICE_PAIR_PORT:
@@ -890,6 +882,14 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
             break;
         }
 
+        key = NULL;
+        val = NULL;
+    }
+
+    if (key && !val) {
+        apr_file_printf(ds->err, "argument '%s' has no corresponding value.\n",
+                apr_pescape_echo(ds->pool, key, 1));
+        return APR_EINVAL;
     }
 
     if (APR_SUCCESS == status) {

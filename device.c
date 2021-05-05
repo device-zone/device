@@ -2066,7 +2066,7 @@ apr_status_t device_command(device_t *d, const char **args,
     device_parse_t *first, *current, *parent;
     int i;
     int root = 0;
-    apr_status_t status;
+    apr_status_t status = APR_SUCCESS;
 
     /* no args or empty args, leave in one piece */
     if (!args || !*args) {
@@ -2189,15 +2189,25 @@ apr_status_t device_command(device_t *d, const char **args,
         apr_procattr_t *procattr;
         apr_proc_t *proc;
         const char **arg;
+        const char *error = NULL;
         apr_finfo_t finfo;
         int count = 0;
         int i;
+        int exitcode = 0;
+        apr_exit_why_e exitwhy = 0;
 
         /* go back and find the command */
         command = current;
         while (command->type == DEVICE_PARSE_PARAMETER) {
+            if ((error = command->p.error)) {
+                break;
+            }
             count++;
             command = command->parent;
+        }
+        if (error) {
+            apr_file_printf(d->err, "%s", error);
+            break;
         }
 
         /* go forward, create the arguments */
@@ -2283,8 +2293,18 @@ apr_status_t device_command(device_t *d, const char **args,
             break;
         }
 
-        if ((status = apr_proc_wait(proc, NULL, NULL, APR_WAIT)) != APR_CHILD_DONE) {
+        if ((status = apr_proc_wait(proc, &exitcode, &exitwhy, APR_WAIT)) != APR_CHILD_DONE) {
             apr_file_printf(d->err, "cannot wait for command: %pm\n", &status);
+            break;
+        }
+
+        if (exitcode != 0 || exitwhy != APR_PROC_EXIT) {
+            apr_file_printf(d->err, "command exited %s with code %d\n",
+                    exitwhy == APR_PROC_EXIT ? "normally" :
+                            exitwhy == APR_PROC_SIGNAL ? "on signal" :
+                                    exitwhy == APR_PROC_SIGNAL_CORE ? "and dumped core" :
+                                            "", exitcode);
+            status = APR_EGENERAL;
             break;
         }
 
@@ -2324,9 +2344,7 @@ apr_status_t device_command(device_t *d, const char **args,
         if (current->parent == NULL && (!strcmp(arg, "quit") ||
                 !strcmp(arg, "exit"))) {
 
-            apr_pool_destroy(first->pool);
-
-            return APR_EOF;
+            status = APR_EOF;
         }
 
         break;
@@ -2341,15 +2359,13 @@ apr_status_t device_command(device_t *d, const char **args,
             apr_file_printf(d->err, "bad command '%s'\n", current->name);
         }
 
-        apr_pool_destroy(first->pool);
-
-        return APR_ENOENT;
+        status = APR_ENOENT;
     }
     }
 
     apr_pool_destroy(first->pool);
 
-    return APR_SUCCESS;
+    return status;
 }
 
 int main(int argc, const char * const argv[])

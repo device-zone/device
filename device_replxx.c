@@ -95,13 +95,13 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
 
 #if HAVE_REPLXX_ADD_COLOR_COMPLETION
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), " ",
                                 NULL), REPLXX_COLOR_BLUE);
 
 #else
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), " ",
                                 NULL));
 
@@ -116,12 +116,12 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
 
 #if HAVE_REPLXX_ADD_COLOR_COMPLETION
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), " ",
                                 NULL), REPLXX_COLOR_BRIGHTBLUE);
 #else
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), " ",
                                 NULL));
 #endif
@@ -135,12 +135,12 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
 
 #if HAVE_REPLXX_ADD_COLOR_COMPLETION
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), " ",
                                 NULL), REPLXX_COLOR_CYAN);
 #else
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), " ",
                                 NULL));
 #endif
@@ -154,12 +154,12 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
 
 #if HAVE_REPLXX_ADD_COLOR_COMPLETION
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), "=",
                                 NULL), REPLXX_COLOR_MAGENTA);
 #else
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), "=",
                                 NULL));
 #endif
@@ -173,12 +173,12 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
 
 #if HAVE_REPLXX_ADD_COLOR_COMPLETION
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), "=",
                                 NULL), REPLXX_COLOR_BRIGHTMAGENTA);
 #else
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), "=",
                                 NULL));
 #endif
@@ -192,12 +192,12 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
 
 #if HAVE_REPLXX_ADD_COLOR_COMPLETION
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), " ",
                                 NULL), REPLXX_COLOR_MAGENTA);
 #else
                 replxx_add_color_completion(lc,
-                        apr_pstrcat(pool,
+                        apr_pstrcat(d->tpool,
                                 device_pescape_shell(pool, name->name), " ",
                                 NULL));
 #endif
@@ -213,7 +213,7 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
             else if (current->p.key && current->offset->equals > -1) {
                 if (current->p.value[0]) {
                     replxx_add_completion(lc,
-                            apr_pstrcat(pool, device_pescape_shell(pool, current->name),
+                            apr_pstrcat(d->tpool, device_pescape_shell(pool, current->p.value),
                                     current->completion, NULL));
                 }
                 else {
@@ -222,7 +222,7 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
             }
             else {
                 replxx_add_completion(lc,
-                        apr_pstrcat(pool, device_pescape_shell(pool, current->name),
+                        apr_pstrcat(d->tpool, device_pescape_shell(pool, current->name),
                                 current->completion, NULL));
             }
 
@@ -230,7 +230,7 @@ static void device_completion_hook(char const *context, replxx_completions *lc,
         else {
 
             replxx_add_completion(lc,
-                    apr_pstrcat(pool, device_pescape_shell(pool, current->name),
+                    apr_pstrcat(d->tpool, device_pescape_shell(pool, current->name),
                             current->completion, NULL));
 
         }
@@ -365,7 +365,7 @@ int device_replxx(device_t *d)
 
     replxx_install_window_change_handler(replxx);
     replxx_set_unique_history(replxx, 1);
-    replxx_set_word_break_characters(replxx, " \t\"'");
+    replxx_set_word_break_characters(replxx, " \t\"'=");
     replxx_set_completion_callback(replxx, device_completion_hook, d);
     replxx_set_highlighter_callback(replxx, device_colour_hook, d);
 

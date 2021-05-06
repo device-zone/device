@@ -79,11 +79,19 @@ typedef enum device_optional_e {
     DEVICE_REQUIRED
 } device_optional_e;
 
+typedef struct device_pair_bytes_t {
+    apr_int64_t min;
+    apr_int64_t max;
+} device_pair_bytes_t;
+
 typedef struct device_pair_t {
     const char *key;
     const char *suffix;
     device_pair_e type;
     device_optional_e optional;
+    union {
+        device_pair_bytes_t b;
+    };
 } device_pair_t;
 
 typedef struct device_file_t {
@@ -102,14 +110,16 @@ static const apr_getopt_option_t
         "  -v, --version\t\t\tDisplay the version number." },
     { "base", 'b', 1, "  -b, --base path\t\tBase path in which to search for option files." },
     { "complete", 'c', 0, "  -c, --complete\t\tPerform command line completion." },
-    { "optional", 'o', 0, "  -o, --optional\t\tOptions declared after this are optional. This is the default." },
+    { "optional", 'o', 0, "  -o, --optional\t\tOptions declared after this are optional. This\n\t\t\t\tis the default." },
     { "required", 'r', 0, "  -r, --required\t\tOptions declared after this are required." },
-    { "port", DEVICE_PORT, 1, "  --port\t\t\tParse a port. Ports are integers in the range\n\t\t\t\t0 to 65535." },
-    { "unprivileged-port", DEVICE_UNPRIVILEGED_PORT, 1, "  --unprivileged-port\t\tParse an unprivileged port. Unprivileged ports are integers in the range\n\t\t\t\t1025 to 49151." },
-    { "hostname", DEVICE_HOSTNAME, 1, "  --hostname\t\t\tParse a hostname. Hostnames consist of the\n\t\t\t\tcharacters a-z, 0-9, or a hyphen. Hostname\n\t\t\t\tcannot start with a hyphen." },
-    { "fqdn", DEVICE_FQDN, 1, "  --fqdn\t\t\tParse a fully qualified domain name. FQDNs\n\t\t\t\tconsist of labels containing the characters\n\t\t\t\ta-z, 0-9, or a hyphen, and cannot start with\n\t\t\t\ta hyphen. Labels are separated by dots, and\n\t\t\t\tthe total length cannot exceed 253 characters." },
-    { "select", DEVICE_SELECT, 1, "  --select\t\t\tParse a selection from a file containing\n\t\t\t\toptions. The file containing options is\n\t\t\t\tsearched relative to the base path, and has\n\t\t\t\tthe same name as the result file. Unambiguous\n\t\t\t\tprefix matches are accepted." },
-    { "bytes", DEVICE_BYTES, 1, "  --bytes\t\t\tParse a positive integer containing bytes.\n\t\t\t\tOptional modifiers like B, kB, KiB, MB, MiB,\n\t\t\t\tGB, GiB, TB, TiB, PB, PiB, EB, EiB are accepted,\n\t\t\t\tand the given string is expanded into a byte\n\t\t\t\tvalue." },
+    { "port", DEVICE_PORT, 1, "  --port=name\t\t\tParse a port. Ports are integers in the range\n\t\t\t\t0 to 65535." },
+    { "unprivileged-port", DEVICE_UNPRIVILEGED_PORT, 1, "  --unprivileged-port=name\tParse an unprivileged port. Unprivileged ports are\n\t\t\t\tintegers in the range 1025 to 49151." },
+    { "hostname", DEVICE_HOSTNAME, 1, "  --hostname=name\t\tParse a hostname. Hostnames consist of the\n\t\t\t\tcharacters a-z, 0-9, or a hyphen. Hostname\n\t\t\t\tcannot start with a hyphen." },
+    { "fqdn", DEVICE_FQDN, 1, "  --fqdn=name\t\t\tParse a fully qualified domain name. FQDNs\n\t\t\t\tconsist of labels containing the characters\n\t\t\t\ta-z, 0-9, or a hyphen, and cannot start with\n\t\t\t\ta hyphen. Labels are separated by dots, and\n\t\t\t\tthe total length cannot exceed 253 characters." },
+    { "select", DEVICE_SELECT, 1, "  --select=name\t\t\tParse a selection from a file containing\n\t\t\t\toptions. The file containing options is\n\t\t\t\tsearched relative to the base path, and has\n\t\t\t\tthe same name as the result file. Unambiguous\n\t\t\t\tprefix matches are accepted." },
+    { "bytes-minimum", DEVICE_BYTES_MIN, 1, "  --bytes-minimum=bytes\t\tLower limit used by the next bytes option. Zero\n\t\t\t\tfor no limit." },
+    { "bytes-maximum", DEVICE_BYTES_MAX, 1, "  --bytes-maximum=bytes\t\tUpper limit used by the next bytes option. Zero\n\t\t\t\tfor no limit." },
+    { "bytes", DEVICE_BYTES, 1, "  --bytes=name\t\t\tParse a positive integer containing bytes.\n\t\t\t\tOptional modifiers like B, kB, KiB, MB, MiB,\n\t\t\t\tGB, GiB, TB, TiB, PB, PiB, EB, EiB are accepted,\n\t\t\t\tand the given string is expanded into a byte\n\t\t\t\tvalue. Modifiers outside of the specified byte\n\t\t\t\trange are ignored." },
     { NULL }
 };
 
@@ -534,6 +544,11 @@ static apr_status_t device_parse_bytes(device_set_t *ds, device_pair_t *pair,
 
     /* zero - short circuit the suffixes */
     if (!end[0] && bytes == 0) {
+        if (pair->b.min > 0) {
+            apr_file_printf(ds->err, "argument '%s': too small.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+            return APR_EINVAL;
+        }
         if (option) {
             option[0] = arg;
         }
@@ -541,16 +556,18 @@ static apr_status_t device_parse_bytes(device_set_t *ds, device_pair_t *pair,
     }
 
 
-#define DEVICE_SET_BYTES(arg,end,options,possibles,result,ds,pair,unit,expanded,limit) \
+#define DEVICE_SET_BYTES(unit,expanded,limit) \
     if (!strncmp(end, unit, strlen(end)) && (limit)) { \
-        const char **opt = apr_array_push(options); \
-        const char **possible = apr_array_push(possibles); \
-        opt[0] = apr_psprintf(ds->pool, "%c%s=%.*s%s", \
-                pair->optional == DEVICE_OPTIONAL ? '-' : '*', \
-                        device_pescape_shell(ds->pool, pair->key), \
-                        (int)(end - arg), arg, unit); \
-        possible[0] = apr_psprintf(ds->pool, "%.*s%s", (int)(end - arg), arg, unit); \
-        result = apr_psprintf(ds->pool, "%" APR_INT64_T_FMT, (apr_int64_t)expanded); \
+        if (!((pair->b.min && expanded < pair->b.min) || (pair->b.max && expanded > pair->b.max))) { \
+            const char **opt = apr_array_push(options); \
+            const char **possible = apr_array_push(possibles); \
+            opt[0] = apr_psprintf(ds->pool, "%c%s=%.*s%s", \
+                    pair->optional == DEVICE_OPTIONAL ? '-' : '*', \
+                            device_pescape_shell(ds->pool, pair->key), \
+                            (int)(end - arg), arg, unit); \
+            possible[0] = apr_psprintf(ds->pool, "%.*s%s", (int)(end - arg), arg, unit); \
+            result = apr_psprintf(ds->pool, "%" APR_INT64_T_FMT, (apr_int64_t)expanded); \
+        } \
     } /* last line of macro... */
 
 
@@ -573,78 +590,96 @@ static apr_status_t device_parse_bytes(device_set_t *ds, device_pair_t *pair,
 #define BYTE1000POW8 1000000000000000000000000
 
     /* bytes */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "B",
+    DEVICE_SET_BYTES("B",
             (bytes), bytes < (apr_int64_t)4*(BYTE1024POW6));
 
     /* 1000    kB    kilobyte */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "kB",
+    DEVICE_SET_BYTES("kB",
             (bytes * BYTE1000POW1), bytes < (apr_int64_t)4*(BYTE1000POW5));
 
     /* 1024    KiB    kibibyte */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "KiB",
+    DEVICE_SET_BYTES("KiB",
             (bytes * BYTE1024POW1), bytes < (apr_int64_t)4*(BYTE1024POW5));
 
     /* 1000^2    MB    megabyte 1000000 */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "MB",
+    DEVICE_SET_BYTES("MB",
             (bytes * BYTE1000POW2), bytes < (apr_int64_t)4*(BYTE1000POW4));
 
     /* 1024^2    MiB    mebibyte 1048576 */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "MiB",
+    DEVICE_SET_BYTES("MiB",
             (bytes * BYTE1024POW2), bytes < (apr_int64_t)4*(BYTE1024POW4));
 
     /* 1000^3    GB    gigabyte 1000000000 */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "GB",
+    DEVICE_SET_BYTES("GB",
             (bytes * BYTE1000POW3), bytes < (apr_int64_t)4*(BYTE1000POW3));
 
     /* 1024^3    GiB    gibibyte 1073741824 */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "GiB",
+    DEVICE_SET_BYTES("GiB",
             (bytes * BYTE1024POW3), bytes < (apr_int64_t)4*(BYTE1024POW3));
 
     /* 1000^4    TB    terabyte 1000000000000 */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "TB",
+    DEVICE_SET_BYTES("TB",
             (bytes * BYTE1000POW4), bytes < (apr_int64_t)4*(BYTE1000POW2));
 
     /* 1024^4    TiB    tebibyte 1099511627776 */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "TiB",
+    DEVICE_SET_BYTES("TiB",
             (bytes * BYTE1024POW4), bytes < (apr_int64_t)4*(BYTE1024POW2));
 
     /* 1000^5    PB    petabyte 1000000000000000 */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "PB",
+    DEVICE_SET_BYTES("PB",
             (bytes * BYTE1000POW5), bytes < (apr_int64_t)4*BYTE1000POW1);
 
     /* 1024^5    PiB    pebibyte 1125899906842624 */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "PiB",
+    DEVICE_SET_BYTES("PiB",
             (bytes * BYTE1024POW5), bytes < (apr_int64_t)4*BYTE1024POW1);
 
     /* 1000^6    EB    exabyte 1000000000000000000 */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "EB",
+    DEVICE_SET_BYTES("EB",
             (bytes * BYTE1000POW6), bytes < 4);
 
     /* 1024^6    EiB    exbibyte 1152921504606846976 */
-    DEVICE_SET_BYTES(arg, end, options, possibles, result, ds, pair, "EiB",
+    DEVICE_SET_BYTES("EiB",
             (bytes * BYTE1024POW6), bytes < 4);
 
     /* not until 128 bit integers */
 #if 0
     /* 1000^7    ZB    zettabyte 1000000000000000000000 */
-    DEVICE_SET_BYTES(arg,end,options,possibles,result,ds,pair,"ZB",
+    DEVICE_SET_BYTES("ZB",
             (bytes * BYTE1000POW7), bytes < 1);
 
     /* 1024^7    ZiB    zebibyte 1180591620717411303424 */
-    DEVICE_SET_BYTES(arg,end,options,possibles,result,ds,pair,"ZiB",
+    DEVICE_SET_BYTES("ZiB",
             (bytes * BYTE1024POW7), bytes < 1);
 
     /* 1000^8    YB    yottabyte 1000000000000000000000000 */
-    DEVICE_SET_BYTES(arg,end,options,possibles,result,ds,pair,"YB",
+    DEVICE_SET_BYTES("YB",
             (bytes * BYTE1000POW8), bytes < 1);
 
     /* 1024^8    YiB    yobibyte  1208925819614629174706176 */
-    DEVICE_SET_BYTES(arg,end,options,possibles,result,ds,pair,"YiB",
+    DEVICE_SET_BYTES("YiB",
             (bytes * BYTE1024POW18), bytes < 1);
 #endif
 
     /* no trailing characters, we are ok */
     if (!end[0]) {
+        if (pair->b.min && pair->b.max && (bytes < pair->b.min || bytes > pair->b.max)) {
+            apr_file_printf(ds->err, "argument '%s': number must be from %" APR_INT64_T_FMT " to %" APR_INT64_T_FMT ".\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    pair->b.min, pair->b.max);
+            return APR_EINVAL;
+        }
+        else if (pair->b.min && bytes < pair->b.min) {
+            apr_file_printf(ds->err, "argument '%s': number must be %" APR_INT64_T_FMT " or higher.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    pair->b.min);
+            return APR_EINVAL;
+        }
+        else if (pair->b.max && bytes > pair->b.max) {
+            apr_file_printf(ds->err, "argument '%s': number must be %" APR_INT64_T_FMT " or lower.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    pair->b.max);
+            return APR_EINVAL;
+        }
         if (option) {
             option[0] = arg;
         }
@@ -652,13 +687,30 @@ static apr_status_t device_parse_bytes(device_set_t *ds, device_pair_t *pair,
     }
 
     /* trailing characters, but no possible options - we're invalid */
-    else if (options->nelts == 0) {
-        apr_file_printf(ds->err, "argument '%s': suffix not recognised.\n",
-                apr_pescape_echo(ds->pool, pair->key, 1));
+    if (options->nelts == 0) {
+        if (pair->b.min && pair->b.max) {
+            apr_file_printf(ds->err, "argument '%s': number must be from %" APR_INT64_T_FMT " to %" APR_INT64_T_FMT ".\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    pair->b.min, pair->b.max);
+        }
+        else if (pair->b.min) {
+            apr_file_printf(ds->err, "argument '%s': number must be %" APR_INT64_T_FMT " or higher.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    pair->b.min);
+        }
+        else if (pair->b.max) {
+            apr_file_printf(ds->err, "argument '%s': number must be %" APR_INT64_T_FMT " or lower.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    pair->b.max);
+        }
+        else {
+            apr_file_printf(ds->err, "argument '%s': suffix not recognised.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+        }
         return APR_EINVAL;
     }
 
-    /* at least one trailing character, and just one option, success */
+    /* just one option, success */
     else if (options->nelts == 1) {
         if (option) {
             option[0] = result;
@@ -772,6 +824,39 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
     }
 
     return status;
+}
+
+/*
+ * Parse a positive integer.
+ */
+static apr_status_t device_parse_int64(device_set_t *ds, const char *arg,
+        apr_int64_t *result)
+{
+    char *end;
+    apr_int64_t bytes;
+
+    if (!arg || !arg[0]) {
+        apr_file_printf(ds->err, "number is empty.\n");
+        return APR_INCOMPLETE;
+    }
+
+    if (arg[0] == '-') {
+        apr_file_printf(ds->err, "number '%s' must be positive.\n",
+                apr_pescape_echo(ds->pool, arg, 1));
+        return APR_EINVAL;
+    }
+
+    bytes = apr_strtoi64(arg, &end, 10);
+
+    if (end[0]) {
+        apr_file_printf(ds->err, "number '%s' is not a number.\n",
+                apr_pescape_echo(ds->pool, arg, 1));
+        return APR_EINVAL;
+    }
+
+    *result = bytes;
+
+    return APR_SUCCESS;
 }
 
 static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
@@ -946,6 +1031,9 @@ int main(int argc, const char * const argv[])
     int complete = 0;
     device_optional_e optional = DEVICE_OPTIONAL;
 
+    apr_int64_t bytes_min = 0;
+    apr_int64_t bytes_max = 0;
+
     /* lets get APR off the ground, and make sure it terminates cleanly */
     if (APR_SUCCESS != (status = apr_app_initialize(&argc, &argv, NULL))) {
         return 1;
@@ -1066,8 +1154,28 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT;
             pair->optional = optional;
+            pair->b.min = bytes_min;
+            pair->b.max = bytes_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_BYTES_MIN: {
+
+            status = device_parse_int64(&ds, optarg, &bytes_min);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_BYTES_MAX: {
+
+            status = device_parse_int64(&ds, optarg, &bytes_max);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
 
             break;
         }

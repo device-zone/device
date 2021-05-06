@@ -1179,6 +1179,7 @@ static apr_status_t device_proc_gets(apr_pool_t *pool, apr_proc_t *proc, char *b
     apr_status_t status;
     apr_pollfd_t pfd = {0};
     apr_pollset_t *pollset;
+    apr_size_t len = *buflen;
     int fds_waiting;
 
     apr_pool_create(&p, pool);
@@ -1224,7 +1225,7 @@ static apr_status_t device_proc_gets(apr_pool_t *pool, apr_proc_t *proc, char *b
 
             if (pdesc[i].desc.f == proc->out) {
 
-                status = apr_file_gets(buf, *buflen, proc->out);
+                status = apr_file_gets(buf, len, proc->out);
                 if (APR_STATUS_IS_EOF(status)) {
                     apr_file_close(proc->out);
                     proc->out = NULL;
@@ -1236,6 +1237,7 @@ static apr_status_t device_proc_gets(apr_pool_t *pool, apr_proc_t *proc, char *b
                     return status;
                 }
                 else {
+                    *buflen = strlen(buf);
                     apr_pool_destroy(p);
                     *what = DEVICE_PROC_STDOUT;
                     return APR_SUCCESS;
@@ -1245,6 +1247,7 @@ static apr_status_t device_proc_gets(apr_pool_t *pool, apr_proc_t *proc, char *b
 
             else if (pdesc[i].desc.f == proc->err) {
 
+                *buflen = len;
                 status = apr_file_read(proc->err, buf, buflen);
                 if (APR_STATUS_IS_EOF(status)) {
                     apr_file_close(proc->err);
@@ -1536,7 +1539,7 @@ device_parse_t* device_parameter_make(device_parse_t *dp, const char *name,
                                 result->size = len - (offsets->equals) - 2;
                                 result->name = apr_pstrndup(dp->pool, args[0] + offsets->equals + 1, result->size);
 
-                                if (size < (offsets->equals)) {
+                                if (size <= (offsets->equals)) {
                                     dp->p.key = apr_pstrndup(dp->pool, args[0], offsets->equals);
                                 }
 

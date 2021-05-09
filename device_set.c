@@ -20,8 +20,6 @@
  *
  */
 
-#include <stdlib.h>
-
 #include <apr.h>
 #include <apr_escape.h>
 #include <apr_file_io.h>
@@ -34,6 +32,12 @@
 
 #include "config.h"
 
+#include <stdlib.h>
+#if HAVE_UNISTD_H
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 #define DEVICE_PORT 257
 #define DEVICE_UNPRIVILEGED_PORT 258
 #define DEVICE_HOSTNAME 259
@@ -42,8 +46,11 @@
 #define DEVICE_BYTES 262
 #define DEVICE_BYTES_MIN 263
 #define DEVICE_BYTES_MAX 264
+#define DEVICE_SYMLINK 265
+#define DEVICE_SYMLINK_BASE 266
 
 #define DEVICE_TXT ".txt"
+#define DEVICE_NONE ""
 
 typedef struct device_set_t {
     apr_pool_t *pool;
@@ -53,6 +60,7 @@ typedef struct device_set_t {
     apr_file_t *out;
     apr_hash_t *pairs;
     const char *path;
+    apr_array_header_t *symlink_bases;
 } device_set_t;
 
 #define DEVICE_PORT_MIN 0
@@ -62,6 +70,9 @@ typedef struct device_set_t {
 #define DEVICE_HOSTNAME_MIN 1
 #define DEVICE_HOSTNAME_MAX 63
 #define DEVICE_SELECT_MAX 80
+#define DEVICE_SELECT_NONE "none"
+#define DEVICE_SYMLINK_MAX 80
+#define DEVICE_SYMLINK_NONE "none"
 
 #define DEVICE_FILE_UMASK (0x0113)
 
@@ -71,7 +82,8 @@ typedef enum device_pair_e {
     DEVICE_PAIR_HOSTNAME,
     DEVICE_PAIR_FQDN,
     DEVICE_PAIR_SELECT,
-    DEVICE_PAIR_BYTES
+    DEVICE_PAIR_BYTES,
+    DEVICE_PAIR_SYMLINK
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -84,6 +96,10 @@ typedef struct device_pair_bytes_t {
     apr_int64_t max;
 } device_pair_bytes_t;
 
+typedef struct device_pair_symlinks_t {
+    apr_array_header_t *bases;
+} device_pair_symlinks_t;
+
 typedef struct device_pair_t {
     const char *key;
     const char *suffix;
@@ -91,6 +107,7 @@ typedef struct device_pair_t {
     device_optional_e optional;
     union {
         device_pair_bytes_t b;
+        device_pair_symlinks_t s;
     };
 } device_pair_t;
 
@@ -98,7 +115,9 @@ typedef struct device_file_t {
     const char *key;
     char *template;
     const char *dest;
+    const char *backup;
     const char *val;
+    apr_filetype_e type;
 } device_file_t;
 
 static const apr_getopt_option_t
@@ -108,7 +127,7 @@ static const apr_getopt_option_t
     { "help", 'h', 0, "  -h, --help\t\t\tDisplay this help message." },
     { "version", 'v', 0,
         "  -v, --version\t\t\tDisplay the version number." },
-    { "base", 'b', 1, "  -b, --base path\t\tBase path in which to search for option files." },
+    { "base", 'b', 1, "  -b, --base=path\t\tBase path in which to search for option files." },
     { "complete", 'c', 0, "  -c, --complete\t\tPerform command line completion." },
     { "optional", 'o', 0, "  -o, --optional\t\tOptions declared after this are optional. This\n\t\t\t\tis the default." },
     { "required", 'r', 0, "  -r, --required\t\tOptions declared after this are required." },
@@ -120,6 +139,8 @@ static const apr_getopt_option_t
     { "bytes-minimum", DEVICE_BYTES_MIN, 1, "  --bytes-minimum=bytes\t\tLower limit used by the next bytes option. Zero\n\t\t\t\tfor no limit." },
     { "bytes-maximum", DEVICE_BYTES_MAX, 1, "  --bytes-maximum=bytes\t\tUpper limit used by the next bytes option. Zero\n\t\t\t\tfor no limit." },
     { "bytes", DEVICE_BYTES, 1, "  --bytes=name\t\t\tParse a positive integer containing bytes.\n\t\t\t\tOptional modifiers like B, kB, KiB, MB, MiB,\n\t\t\t\tGB, GiB, TB, TiB, PB, PiB, EB, EiB are accepted,\n\t\t\t\tand the given string is expanded into a byte\n\t\t\t\tvalue. Modifiers outside of the specified byte\n\t\t\t\trange are ignored." },
+    { "symlink-base", DEVICE_SYMLINK_BASE, 1, "  --symlink-base=path\t\tBase path containing targets for symbolic links.\n\t\t\t\tMore than one path can be specified. In the case\n\t\t\t\tof collision, the earliest match wins." },
+    { "symlink", DEVICE_SYMLINK, 1, "  --symlink=name\t\tParse a selection from a list of files or\n\t\t\t\tdirectories matching the symlink-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
     { NULL }
 };
 
@@ -391,6 +412,7 @@ static apr_status_t device_parse_fqdn(device_set_t *ds, device_pair_t *pair,
 static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
         const char *arg, apr_array_header_t *options, const char **option)
 {
+    const char *none = NULL;
     apr_file_t *in;
     const char *optname;
     char *optpath;
@@ -398,11 +420,19 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
     apr_status_t status;
     apr_size_t arglen = arg ? strlen(arg) : 0;
 
+    if (option) {
+        option[0] = NULL; /* until further notice */
+    }
+
+    if (pair->optional == DEVICE_OPTIONAL) {
+        none = DEVICE_SYMLINK_NONE;
+    }
+
     /* options are in same libexec directory as command */
-    optname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
+    optname = apr_pstrcat(ds->pool, "../", pair->key, pair->suffix, NULL);
     if (APR_SUCCESS
             != (status = apr_filepath_merge(&optpath, ds->path,
-                    optname, APR_FILEPATH_NOTABOVEROOT, ds->pool))) {
+                    optname, APR_FILEPATH_TRUENAME, ds->pool))) {
         apr_file_printf(ds->err, "cannot merge options '%s': %pm\n", pair->key,
                 &status);
     }
@@ -435,10 +465,21 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
 
         apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
 
-        while (APR_SUCCESS == (status = apr_file_gets(buffer, size, in))) {
+        do {
 
             const char **possible;
-            apr_size_t optlen = strlen(buffer);
+            apr_size_t optlen;
+            int exact;
+
+            if (none) {
+                strcpy(buffer, DEVICE_SELECT_NONE);
+            } else {
+                status = apr_file_gets(buffer, size, in);
+                if (status != APR_SUCCESS) {
+                    break;
+                }
+            }
+            optlen = strlen(buffer);
 
             /* chop trailing newline */
             if (optlen && buffer[optlen - 1] == '\n') {
@@ -453,10 +494,17 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
             possible = apr_array_push(possibles);
             possible[0] = apr_pstrdup(ds->pool, buffer);
 
+            exact = (0 == strcmp(arg, buffer));
+
             if (!strncmp(arg, buffer, arglen)) {
 
-                const char **opt = apr_array_push(options);
+                const char **opt;
 
+                if (exact) {
+                    apr_array_clear(options);
+                }
+
+                opt = apr_array_push(options);
                 opt[0] = apr_pstrcat(ds->pool,
                         pair->optional == DEVICE_OPTIONAL ? "-" : "*",
                         device_pescape_shell(ds->pool, pair->key), "=",
@@ -464,17 +512,32 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
                         NULL);
 
                 if (option) {
-                    option[0] = possible[0];
+                    if (none) {
+                        option[0] = NULL;
+                    }
+                    else {
+                        option[0] = possible[0];
+                    }
                 }
             }
 
-        }
+            if (exact) {
+                /* exact matches short circuit */
+                break;
+            }
+
+            none = NULL;
+
+        } while (1);
 
         apr_file_close(in);
 
-        if (APR_EOF == status) {
+        if (APR_SUCCESS == status) {
+            /* short circuit, all good */
+        }
+        else if (APR_EOF == status) {
 
-            if (*option) {
+            if (option && option[0]) {
                 if (options->nelts == 1) {
                     /* all ok */
                 }
@@ -724,6 +787,165 @@ static apr_status_t device_parse_bytes(device_set_t *ds, device_pair_t *pair,
     return APR_INCOMPLETE;
 }
 
+/**
+ * Symlink is a name that will be linked to a series of files or directories at
+ * a target path.
+ */
+static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    const char *none = NULL;
+    apr_status_t status;
+    apr_size_t arglen = arg ? strlen(arg) : 0;
+    apr_size_t poslen = 0;
+
+    apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
+
+    int i;
+
+    if (option) {
+        option[0] = NULL; /* until further notice */
+    }
+
+    if (!pair->s.bases) {
+        apr_file_printf(ds->err, "no base directory specified for '%s'\n", pair->key);
+        return APR_EGENERAL;
+    }
+
+    if (pair->optional == DEVICE_OPTIONAL) {
+        none = DEVICE_SYMLINK_NONE;
+    }
+
+    for (i = 0; i < pair->s.bases->nelts; i++) {
+
+        apr_dir_t *thedir;
+        apr_finfo_t dirent;
+
+        const char *base = APR_ARRAY_IDX(pair->s.bases, i, const char *);
+
+        if ((status = apr_dir_open(&thedir, base, ds->pool)) != APR_SUCCESS) {
+            /* could not open directory, skip */
+            continue;
+        }
+
+        do {
+            const char **possible;
+
+            if (none) {
+                dirent.name = none;
+                dirent.filetype = APR_REG;
+            } else {
+                status = apr_dir_read(&dirent,
+                        APR_FINFO_TYPE | APR_FINFO_NAME | APR_FINFO_WPROT, thedir);
+                if (APR_STATUS_IS_INCOMPLETE(status)) {
+                    continue; /* ignore un-stat()able files */
+                } else if (status != APR_SUCCESS) {
+                    break;
+                }
+            }
+
+            /* hidden files are ignored */
+            if (dirent.name[0] == '.') {
+                continue;
+            }
+
+            switch (dirent.filetype) {
+            case APR_LNK:
+            case APR_REG:
+            case APR_DIR: {
+
+                int exact = (0 == strcmp(arg, dirent.name));
+
+                possible = apr_array_push(possibles);
+                possible[0] = apr_pstrdup(ds->pool, dirent.name);
+                poslen += strlen(possible[0]);
+
+                if (!strncmp(arg, dirent.name, arglen)) {
+
+                    const char **opt;
+
+                    if (exact) {
+                        apr_array_clear(options);
+                    }
+
+                    opt = apr_array_push(options);
+                    opt[0] = apr_pstrcat(ds->pool,
+                            pair->optional == DEVICE_OPTIONAL ? "-" : "*",
+                            device_pescape_shell(ds->pool, pair->key), "=",
+                            device_pescape_shell(ds->pool, dirent.name),
+                            NULL);
+
+                    if (option) {
+
+                        char *target;
+
+                        if (none) {
+                            option[0] = NULL;
+                        }
+                        else if (APR_SUCCESS
+                                != (status = apr_filepath_merge(&target, base,
+                                        dirent.name, APR_FILEPATH_NATIVE, ds->pool))) {
+                            apr_file_printf(ds->err, "cannot merge links '%s': %pm\n", pair->key,
+                                    &status);
+                        }
+                        else {
+                            option[0] = target;
+                        }
+
+                    }
+                }
+
+                if (exact) {
+                    /* exact matches short circuit */
+                    goto done;
+                }
+
+                break;
+            }
+            default:
+                break;
+            }
+
+            none = NULL;
+
+        } while (1);
+
+        apr_dir_close(thedir);
+
+    }
+done:
+
+    if (APR_SUCCESS == status) {
+        /* short circuit, all good */
+    }
+    else if (APR_STATUS_IS_ENOENT(status)) {
+
+        if (option && option[0]) {
+            if (options->nelts == 1) {
+                /* all ok */
+            }
+            else {
+                if (poslen < DEVICE_SYMLINK_MAX) {
+                    apr_file_printf(ds->err, "argument '%s' must be one of: %s\n",
+                            apr_pescape_echo(ds->pool, pair->key, 1), apr_array_pstrcat(ds->pool, possibles, ','));
+                }
+                else {
+                    apr_file_printf(ds->err, "argument '%s': value does not match a valid option.\n",
+                            apr_pescape_echo(ds->pool, pair->key, 1));
+                }
+                return APR_INCOMPLETE;
+            }
+        }
+
+        status = APR_SUCCESS;
+    }
+    else {
+        apr_file_printf(ds->err, "cannot read option '%s': %pm\n", pair->key,
+                &status);
+    }
+
+    return status;
+}
 
 static apr_status_t device_complete(device_set_t *ds, const char **args)
 {
@@ -781,6 +1003,9 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
                 break;
             case DEVICE_PAIR_BYTES:
                 status = device_parse_bytes(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_SYMLINK:
+                status = device_parse_symlink(ds, pair, value, options, NULL);
                 break;
             default:
                 status = APR_EINVAL;
@@ -871,45 +1096,87 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
         device_file_t *file = &APR_ARRAY_IDX(files, i, device_file_t);
 
-        /* write the result */
+        /* move away the original */
+        file->backup = apr_psprintf(ds->pool, "%s.backup", file->dest);
         if (APR_SUCCESS
-                != (status = apr_file_mktemp(&out, file->template,
-                        APR_FOPEN_CREATE | APR_FOPEN_WRITE | APR_FOPEN_EXCL,
-                        ds->pool))) {
-            apr_file_printf(ds->err, "cannot save '%s': %pm\n", file->key, &status);
+                != (status = apr_file_rename(file->dest, file->backup, ds->pool))
+                && !APR_STATUS_IS_ENOENT(status)) {
+            apr_file_printf(ds->err, "cannot move '%s': %pm\n", file->key, &status);
             break;
         }
-        else if (APR_SUCCESS != (status = apr_file_write_full(out, file->val, strlen(file->val), NULL))) {
-            apr_file_printf(ds->err, "cannot write '%s': %pm\n", file->key, &status);
-            break;
+
+        if (!file->val) {
+
+            /* no value, write nothing */
+
         }
-        else if (APR_SUCCESS != (status = apr_file_close(out))) {
-            apr_file_printf(ds->err, "cannot close '%s': %pm\n", file->key, &status);
-            break;
+        else if (file->type == APR_REG) {
+
+            /* write the result */
+            if (APR_SUCCESS
+                    != (status = apr_file_mktemp(&out, file->template,
+                            APR_FOPEN_CREATE | APR_FOPEN_WRITE | APR_FOPEN_EXCL,
+                            ds->pool))) {
+                apr_file_printf(ds->err, "cannot save '%s': %pm\n", file->key, &status);
+                break;
+            }
+            else if (APR_SUCCESS
+                    != (status = apr_file_write_full(out, file->val, strlen(file->val),
+                            NULL))) {
+                apr_file_printf(ds->err, "cannot write '%s': %pm\n", file->key, &status);
+                break;
+            }
+            else if (APR_SUCCESS != (status = apr_file_close(out))) {
+                apr_file_printf(ds->err, "cannot close '%s': %pm\n", file->key, &status);
+                break;
+            }
+            else if (APR_SUCCESS
+                    != (status = apr_file_perms_set(file->template,
+                            APR_FPROT_OS_DEFAULT & ~DEVICE_FILE_UMASK))) {
+                apr_file_printf(ds->err, "cannot set permissions on '%s': %pm\n",
+                        file->key, &status);
+                break;
+            }
         }
-        else if (APR_SUCCESS
-                != (status = apr_file_perms_set(file->template,
-                        APR_FPROT_OS_DEFAULT & ~DEVICE_FILE_UMASK))) {
-            apr_file_printf(ds->err, "cannot set permissions on '%s': %pm\n", file->key, &status);
-            break;
+        else if (file->type == APR_LNK) {
+
+            /* APR needs a mktemp function that can do symlinks */
+            pid_t pid = getpid();
+            file->template = apr_psprintf(ds->pool, "%s;%" APR_PID_T_FMT, file->dest, pid);
+
+            errno = 0;
+            symlink(file->val, file->template);
+            if (APR_SUCCESS != (status = errno)) {
+                apr_file_printf(ds->err, "cannot link '%s': %pm\n", file->key, &status);
+                break;
+            }
         }
 
     }
 
     /* could not write, try to rollback */
-    if (APR_SUCCESS != status) {
+    if (APR_SUCCESS != status && !APR_STATUS_IS_ENOENT(status)) {
 
         for (i = 0; i < files->nelts; i++) {
 
+            apr_status_t status; /* intentional shadowing of status */
+
             device_file_t *file = &APR_ARRAY_IDX(files, i, device_file_t);
 
-            if (APR_SUCCESS != (status = apr_file_remove(file->template, ds->pool))) {
+            if (file->backup && APR_SUCCESS
+                    != (status = apr_file_rename(file->backup, file->dest, ds->pool))
+                    && !APR_STATUS_IS_ENOENT(status)) {
                 apr_file_printf(ds->err, "cannot move '%s': %pm\n", file->key, &status);
-                break;
+            }
+
+            if (APR_SUCCESS != (status = apr_file_remove(file->template, ds->pool))
+                    && !APR_STATUS_IS_ENOENT(status)) {
+                apr_file_printf(ds->err, "cannot remove '%s': %pm\n", file->key, &status);
             }
 
         }
 
+        return status;
     }
 
     /* otherwise do the renames */
@@ -919,16 +1186,21 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
             device_file_t *file = &APR_ARRAY_IDX(files, i, device_file_t);
 
-            if (APR_SUCCESS != (status = apr_file_rename(file->template, file->dest, ds->pool))) {
+            if (APR_SUCCESS != (status = apr_file_rename(file->template, file->dest, ds->pool))
+                    && !APR_STATUS_IS_ENOENT(status)) {
                 apr_file_printf(ds->err, "cannot move '%s': %pm\n", file->key, &status);
-                break;
+            }
+
+            if (file->backup && APR_SUCCESS != (status = apr_file_remove(file->backup, ds->pool))
+                    && !APR_STATUS_IS_ENOENT(status)) {
+                apr_file_printf(ds->err, "cannot remove '%s': %pm\n", file->key, &status);
             }
 
         }
 
+        return APR_SUCCESS;
     }
 
-    return status;
 }
 
 static apr_status_t device_set(device_set_t *ds, const char **args)
@@ -962,6 +1234,9 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
 
             apr_array_header_t *options = apr_array_make(ds->pool, (len / 2), sizeof(char *));
 
+            file = apr_array_push(files);
+            file->type = APR_REG;
+
             switch (pair->type) {
             case DEVICE_PAIR_PORT:
                 status = device_parse_port(ds, pair, val);
@@ -981,9 +1256,11 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
             case DEVICE_PAIR_BYTES:
                 status = device_parse_bytes(ds, pair, val, options, &val);
                 break;
+            case DEVICE_PAIR_SYMLINK:
+                status = device_parse_symlink(ds, pair, val, options, &val);
+                file->type = APR_LNK;
+                break;
             }
-
-            file = apr_array_push(files);
 
             file->dest = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
             file->template = apr_pstrcat(ds->pool, file->dest, ".XXXXXX", NULL);
@@ -1176,6 +1453,34 @@ int main(int argc, const char * const argv[])
             if (APR_SUCCESS != status) {
                 exit(2);
             }
+
+            break;
+        }
+        case DEVICE_SYMLINK: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_SYMLINK;
+            pair->key = optarg;
+            pair->suffix = DEVICE_NONE;
+            pair->optional = optional;
+            pair->s.bases = ds.symlink_bases;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            ds.symlink_bases = NULL;
+
+            break;
+        }
+        case DEVICE_SYMLINK_BASE: {
+
+            const char **base;
+
+            if (!ds.symlink_bases) {
+                ds.symlink_bases = apr_array_make(ds.pool, 2, sizeof(const char *));
+            }
+            base = apr_array_push(ds.symlink_bases);
+            base[0]= optarg;
 
             break;
         }

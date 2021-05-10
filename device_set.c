@@ -52,6 +52,11 @@
 #define DEVICE_TXT ".txt"
 #define DEVICE_NONE ""
 
+typedef enum device_mode_e {
+    DEVICE_SET,
+    DEVICE_ADD
+} device_mode_e;
+
 typedef struct device_set_t {
     apr_pool_t *pool;
     apr_pool_t *tpool;
@@ -62,6 +67,7 @@ typedef struct device_set_t {
     apr_hash_t *pairs;
     const char *path;
     apr_array_header_t *symlink_bases;
+    device_mode_e mode;
 } device_set_t;
 
 #define DEVICE_ID_MAX 255
@@ -134,9 +140,10 @@ static const apr_getopt_option_t
     { "complete", 'c', 0, "  -c, --complete\t\tPerform command line completion." },
     { "optional", 'o', 0, "  -o, --optional\t\tOptions declared after this are optional. This\n\t\t\t\tis the default." },
     { "required", 'r', 0, "  -r, --required\t\tOptions declared after this are required." },
+    { "add", 'a', 0, "  -a, --add\t\t\tAdd a new set of options, named by the id\n\t\t\t\toption, which becomes required." },
     { "id", 'i', 1, "  -i, --id=name\t\t\tName the set of options. If set, options will\n\t\t\t\tbe written in the subdirectory referred to by\n\t\t\t\tthe first key." },
     { "port", DEVICE_PORT, 1, "  --port=name\t\t\tParse a port. Ports are integers in the range\n\t\t\t\t0 to 65535." },
-    { "unprivileged-port", DEVICE_UNPRIVILEGED_PORT, 1, "  --unprivileged-port=name\tParse an unprivileged port. Unprivileged ports are\n\t\t\t\tintegers in the range 1025 to 49151." },
+    { "unprivileged-port", DEVICE_UNPRIVILEGED_PORT, 1, "  --unprivileged-port=name\tParse an unprivileged port. Unprivileged ports\n\t\t\t\tare integers in the range 1025 to 49151." },
     { "hostname", DEVICE_HOSTNAME, 1, "  --hostname=name\t\tParse a hostname. Hostnames consist of the\n\t\t\t\tcharacters a-z, 0-9, or a hyphen. Hostname\n\t\t\t\tcannot start with a hyphen." },
     { "fqdn", DEVICE_FQDN, 1, "  --fqdn=name\t\t\tParse a fully qualified domain name. FQDNs\n\t\t\t\tconsist of labels containing the characters\n\t\t\t\ta-z, 0-9, or a hyphen, and cannot start with\n\t\t\t\ta hyphen. Labels are separated by dots, and\n\t\t\t\tthe total length cannot exceed 253 characters." },
     { "select", DEVICE_SELECT, 1, "  --select=name\t\t\tParse a selection from a file containing\n\t\t\t\toptions. The file containing options is\n\t\t\t\tsearched relative to the base path, and has\n\t\t\t\tthe same name as the result file. Unambiguous\n\t\t\t\tprefix matches are accepted." },
@@ -1177,7 +1184,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
         return status;
     }
 
-    /* any directory renames? */
+    /* any directory renames or creates? */
     for (i = 0; i < files->nelts; i++)
     {
         device_file_t *file = &APR_ARRAY_IDX(files, i, device_file_t);
@@ -1187,7 +1194,32 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
         }
     }
 
-    if (ds->id) {
+    if (ds->mode == DEVICE_ADD) {
+
+        /* try the directory create */
+        if (id) {
+
+            if (APR_SUCCESS != (status = apr_dir_make(id,
+                    APR_FPROT_OS_DEFAULT, ds->pool))) {
+                apr_file_printf(ds->err, "cannot create '%s': %pm\n", key, &status);
+                return status;
+            }
+
+            /* change current working directory */
+            status = apr_filepath_set(id, ds->pool);
+            if (APR_SUCCESS != status) {
+                apr_file_printf(ds->err, "cannot access '%s': %pm\n", ds->id, &status);
+                return status;
+            }
+
+        }
+        else {
+            apr_file_printf(ds->err, "argument '%s' not specified\n", ds->id);
+            return status;
+        }
+
+    }
+    else if (ds->id) {
 
         /* try the directory rename */
         if (id) {
@@ -1304,7 +1336,13 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
                 return status;
             }
 
-            if (ds->id) {
+            if (ds->mode == DEVICE_ADD) {
+                if (APR_SUCCESS != (status = apr_dir_remove(id, ds->pool))) {
+                    apr_file_printf(ds->err, "cannot remove '%s': %pm\n", key, &status);
+                    return status;
+                }
+            }
+            else if (ds->id) {
                 if (APR_SUCCESS != (status = apr_file_rename(id, ds->id, ds->pool))) {
                     apr_file_printf(ds->err, "cannot rename '%s': %pm\n", key, &status);
                     return status;
@@ -1352,7 +1390,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
         return APR_EINVAL;
     }
 
-    if (ds->id) {
+    if (ds->id && ds->mode == DEVICE_SET) {
 
         apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
         int i;
@@ -1483,7 +1521,7 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
 
     apr_array_header_t *files = apr_array_make(ds->pool, len, sizeof(device_file_t));
 
-    if (ds->id) {
+    if (ds->id && ds->mode == DEVICE_SET) {
 
         apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
 
@@ -1627,6 +1665,10 @@ int main(int argc, const char * const argv[])
             == APR_SUCCESS) {
 
         switch (optch) {
+        case 'a': {
+            ds.mode = DEVICE_ADD;
+            break;
+        }
         case 'b': {
             ds.path = optarg;
             break;
@@ -1658,7 +1700,7 @@ int main(int argc, const char * const argv[])
             pair->type = DEVICE_PAIR_ID;
             pair->key = optarg;
             pair->suffix = DEVICE_NONE;
-            pair->optional = DEVICE_REQUIRED;
+            pair->optional = (ds.mode == DEVICE_SET) ? DEVICE_OPTIONAL : DEVICE_REQUIRED;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
@@ -1797,6 +1839,11 @@ int main(int argc, const char * const argv[])
     }
     if (APR_SUCCESS != status && APR_EOF != status) {
         return help(ds.err, argv[0], NULL, EXIT_FAILURE, cmdline_opts);
+    }
+
+    if (!ds.id && ds.mode == DEVICE_ADD) {
+        return help(ds.err, argv[0], "The --add option requires an --id option.",
+                EXIT_FAILURE, cmdline_opts);
     }
 
     if (complete) {

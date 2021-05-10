@@ -58,11 +58,13 @@ typedef struct device_set_t {
     apr_file_t *err;
     apr_file_t *in;
     apr_file_t *out;
+    const char *id;
     apr_hash_t *pairs;
     const char *path;
     apr_array_header_t *symlink_bases;
 } device_set_t;
 
+#define DEVICE_ID_MAX 255
 #define DEVICE_PORT_MIN 0
 #define DEVICE_PORT_MAX 65535
 #define DEVICE_PORT_UNPRIVILEGED_MIN 1025
@@ -77,6 +79,7 @@ typedef struct device_set_t {
 #define DEVICE_FILE_UMASK (0x0113)
 
 typedef enum device_pair_e {
+    DEVICE_PAIR_ID,
     DEVICE_PAIR_PORT,
     DEVICE_PAIR_UNPRIVILEGED_PORT,
     DEVICE_PAIR_HOSTNAME,
@@ -131,6 +134,7 @@ static const apr_getopt_option_t
     { "complete", 'c', 0, "  -c, --complete\t\tPerform command line completion." },
     { "optional", 'o', 0, "  -o, --optional\t\tOptions declared after this are optional. This\n\t\t\t\tis the default." },
     { "required", 'r', 0, "  -r, --required\t\tOptions declared after this are required." },
+    { "id", 'i', 1, "  -i, --id=name\t\t\tName the set of options. If set, options will\n\t\t\t\tbe written in the subdirectory referred to by\n\t\t\t\tthe first key." },
     { "port", DEVICE_PORT, 1, "  --port=name\t\t\tParse a port. Ports are integers in the range\n\t\t\t\t0 to 65535." },
     { "unprivileged-port", DEVICE_UNPRIVILEGED_PORT, 1, "  --unprivileged-port=name\tParse an unprivileged port. Unprivileged ports are\n\t\t\t\tintegers in the range 1025 to 49151." },
     { "hostname", DEVICE_HOSTNAME, 1, "  --hostname=name\t\tParse a hostname. Hostnames consist of the\n\t\t\t\tcharacters a-z, 0-9, or a hyphen. Hostname\n\t\t\t\tcannot start with a hyphen." },
@@ -215,6 +219,67 @@ static int abortfunc(int retcode)
     fprintf(stderr, "Out of memory.\n");
 
     return retcode;
+}
+
+/*
+ * ID is an identifier mapping to the directory containing the configuration.
+ * We allow lowercase, digits, '-', '_' and '.'. Uppercase could confuse
+ * case insensitive filesystems, and various punctuation could break scripts.
+ */
+static apr_status_t device_parse_id(device_set_t *ds, device_pair_t *pair,
+        const char *arg)
+{
+    int len = 0;
+
+    if (!arg || !arg[0]) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    while (arg[len]) {
+        char c = arg[len++];
+
+        if (c >= '0' && c <= '9') {
+            /* ok */
+        }
+        else if (c >= 'a' && c <= 'z') {
+            /* ok */
+        }
+        else if (c == '-' || c == '_') {
+            /* ok */
+        }
+        else if (c == '.') {
+            if (len == 1) {
+                /* first character cannot be a dot */
+                apr_file_printf(ds->err, "argument '%s': first character cannot be a dot.\n",
+                        apr_pescape_echo(ds->pool, pair->key, 1));
+                return APR_EINVAL;
+            }
+            else {
+                /* ok */
+            }
+        }
+        else {
+            /* not ok */
+            apr_file_printf(ds->err, "argument '%s': '%c' is an invalid character.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1), c);
+            return APR_EINVAL;
+        }
+
+        if (len == DEVICE_ID_MAX) {
+            /* not ok */
+            apr_file_printf(ds->err, "argument '%s': '%s' is too long.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    apr_pescape_echo(ds->pool,
+                            apr_pstrcat(ds->pool,
+                                    apr_pstrndup(ds->pool, arg, 64), "...",
+                                    NULL), 1));
+            return APR_EINVAL;
+        }
+    }
+
+    return APR_SUCCESS;
 }
 
 /*
@@ -429,10 +494,10 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
     }
 
     /* options are in same libexec directory as command */
-    optname = apr_pstrcat(ds->pool, "../", pair->key, pair->suffix, NULL);
+    optname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
     if (APR_SUCCESS
             != (status = apr_filepath_merge(&optpath, ds->path,
-                    optname, APR_FILEPATH_TRUENAME, ds->pool))) {
+                    optname, APR_FILEPATH_SECUREROOT | APR_FILEPATH_TRUENAME, ds->pool))) {
         apr_file_printf(ds->err, "cannot merge options '%s': %pm\n", pair->key,
                 &status);
     }
@@ -896,7 +961,10 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
                 }
 
                 if (exact) {
+
                     /* exact matches short circuit */
+                    apr_dir_close(thedir);
+
                     goto done;
                 }
 
@@ -947,110 +1015,6 @@ done:
     return status;
 }
 
-static apr_status_t device_complete(device_set_t *ds, const char **args)
-{
-    const char *key = NULL, *value = NULL;
-
-    apr_status_t status;
-    int count = 0;
-
-    if (!args[0]) {
-        /* no args is not ok */
-        apr_file_printf(ds->err, "complete needs one or more arguments.\n");
-        return APR_EINVAL;
-    }
-
-    /* find the last key/value pair, or just the key if odd */
-    while(args[count]) {
-        if (!args[count + 1]) {
-            key = args[count + 0];
-            value = NULL;
-            break;
-        }
-        else {
-            key = args[count + 0];
-            value = args[count + 1];
-        }
-        count += 2;
-    }
-
-    if (value) {
-
-        device_pair_t *pair;
-
-        pair = apr_hash_get(ds->pairs, key, APR_HASH_KEY_STRING);
-
-        if (pair) {
-
-            apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
-            int i;
-
-            switch (pair->type) {
-            case DEVICE_PAIR_PORT:
-                status = device_parse_port(ds, pair, value);
-                break;
-            case DEVICE_PAIR_UNPRIVILEGED_PORT:
-                status = device_parse_unprivileged_port(ds, pair, value);
-                break;
-            case DEVICE_PAIR_HOSTNAME:
-                status = device_parse_hostname(ds, pair, value);
-                break;
-            case DEVICE_PAIR_FQDN:
-                status = device_parse_fqdn(ds, pair, value);
-                break;
-            case DEVICE_PAIR_SELECT:
-                status = device_parse_select(ds, pair, value, options, NULL);
-                break;
-            case DEVICE_PAIR_BYTES:
-                status = device_parse_bytes(ds, pair, value, options, NULL);
-                break;
-            case DEVICE_PAIR_SYMLINK:
-                status = device_parse_symlink(ds, pair, value, options, NULL);
-                break;
-            default:
-                status = APR_EINVAL;
-            }
-
-            for (i = 0; i < options->nelts; i++) {
-                const char *option = APR_ARRAY_IDX(options, i, const char *);
-                apr_file_printf(ds->out, "%s\n", option);
-            }
-
-        }
-        else {
-            // FIXME: add option for an "overflow" of unknown arguments
-            apr_file_printf(ds->err, "key '%s' is not recognised.\n",
-                    apr_pescape_echo(ds->pool, key, 1));
-            return APR_EINVAL;
-        }
-
-    }
-    else {
-
-        apr_hash_index_t *hi;
-        void *v;
-        device_pair_t *pair;
-
-        for (hi = apr_hash_first(ds->pool, ds->pairs); hi; hi = apr_hash_next(hi)) {
-
-            apr_hash_this(hi, NULL, NULL, &v);
-            pair = v;
-
-            if (!key || !key[0] || !strncmp(key, pair->key, strlen(key))) {
-                apr_file_printf(ds->out, "%c%s=\n",
-                        pair->optional == DEVICE_OPTIONAL ? '-' : '*',
-                        device_pescape_shell(ds->pool, pair->key));
-            }
-
-        }
-
-        status = APR_INCOMPLETE;
-
-    }
-
-    return status;
-}
-
 /*
  * Parse a positive integer.
  */
@@ -1084,10 +1048,165 @@ static apr_status_t device_parse_int64(device_set_t *ds, const char *arg,
     return APR_SUCCESS;
 }
 
+static apr_status_t device_id(device_set_t *ds, const char *arg,
+        apr_array_header_t *options, const char **option)
+{
+
+    apr_dir_t *thedir;
+    apr_finfo_t dirent;
+
+    apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
+
+    apr_status_t status;
+
+    apr_size_t arglen = strlen(arg);
+    apr_size_t poslen = 0;
+
+    /* scan the directories to find a match */
+    if ((status = apr_dir_open(&thedir, ".", ds->pool)) != APR_SUCCESS) {
+        /* could not open directory, fail */
+        apr_file_printf(ds->err, "could not open current directory: %pm\n", &status);
+        return status;
+    }
+
+    do {
+        const char **possible;
+
+        status = apr_dir_read(&dirent,
+                APR_FINFO_TYPE | APR_FINFO_NAME | APR_FINFO_WPROT, thedir);
+        if (APR_STATUS_IS_INCOMPLETE(status)) {
+            continue; /* ignore un-stat()able files */
+        } else if (status != APR_SUCCESS) {
+            break;
+        }
+
+        /* hidden files are ignored */
+        if (dirent.name[0] == '.') {
+            continue;
+        }
+
+        switch (dirent.filetype) {
+        case APR_DIR: {
+
+            int exact = (0 == strcmp(arg, dirent.name));
+
+            possible = apr_array_push(possibles);
+            possible[0] = apr_pstrdup(ds->pool, dirent.name);
+            poslen += strlen(possible[0]);
+
+            if (!strncmp(arg, dirent.name, arglen)) {
+
+                const char **opt;
+
+                if (exact) {
+                    apr_array_clear(options);
+                }
+
+                opt = apr_array_push(options);
+                opt[0] = apr_pstrcat(ds->pool, "*",
+                        device_pescape_shell(ds->pool, dirent.name), " ",
+                        NULL);
+
+                if (option) {
+                    option[0] = dirent.name;
+                }
+            }
+
+            if (exact) {
+                /* exact matches short circuit */
+                goto done;
+            }
+
+            break;
+        }
+        default:
+            break;
+        }
+
+    } while (1);
+
+done:
+
+    apr_dir_close(thedir);
+
+    if (APR_SUCCESS == status) {
+        /* short circuit, all good */
+    }
+    else if (APR_STATUS_IS_ENOENT(status)) {
+
+        if (option && option[0]) {
+            if (options->nelts == 1) {
+                /* all ok */
+            }
+            else {
+                if (poslen < DEVICE_SYMLINK_MAX) {
+                    apr_file_printf(ds->err, "argument '%s' must be one of: %s\n",
+                            apr_pescape_echo(ds->pool, arg, 1), apr_array_pstrcat(ds->pool, possibles, ','));
+                }
+                else {
+                    apr_file_printf(ds->err, "argument '%s': value does not match a valid option.\n",
+                            apr_pescape_echo(ds->pool, arg, 1));
+                }
+                return APR_INCOMPLETE;
+            }
+        }
+
+        status = APR_SUCCESS;
+    }
+    else {
+        apr_file_printf(ds->err, "cannot read option '%s': %pm\n",
+                apr_pescape_echo(ds->pool, arg, 1), &status);
+    }
+
+
+    return APR_SUCCESS;
+}
+
 static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 {
+    char *pwd;
+    const char *id = NULL, *key = NULL;
     apr_status_t status = APR_SUCCESS;
     int i;
+
+    /* save the present working directory */
+    status = apr_filepath_get(&pwd, APR_FILEPATH_NATIVE, ds->pool);
+
+    if (APR_SUCCESS != status) {
+        apr_file_printf(ds->err, "cannot access cwd: %pm\n", &status);
+        return status;
+    }
+
+    /* any directory renames? */
+    for (i = 0; i < files->nelts; i++)
+    {
+        device_file_t *file = &APR_ARRAY_IDX(files, i, device_file_t);
+
+        if (file->type == APR_DIR) {
+            id = file->val;
+        }
+    }
+
+    if (ds->id) {
+
+        /* try the directory rename */
+        if (id) {
+            if (APR_SUCCESS != (status = apr_file_rename(ds->id, id, ds->pool))) {
+                apr_file_printf(ds->err, "cannot rename '%s': %pm\n", key, &status);
+                return status;
+            }
+            status = apr_filepath_set(id, ds->pool);
+        }
+        else {
+            status = apr_filepath_set(ds->id, ds->pool);
+        }
+
+        /* change current working directory */
+        if (APR_SUCCESS != status) {
+            apr_file_printf(ds->err, "cannot access '%s': %pm\n", ds->id, &status);
+            return status;
+        }
+    }
 
     /* try to write */
     for (i = 0; i < files->nelts; i++)
@@ -1176,6 +1295,23 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
         }
 
+        if (id) {
+
+            /* revert to present working directory */
+            status = apr_filepath_set(pwd, ds->pool);
+            if (APR_SUCCESS != status) {
+                apr_file_printf(ds->err, "cannot revert '%s': %pm\n", id, &status);
+                return status;
+            }
+
+            if (ds->id) {
+                if (APR_SUCCESS != (status = apr_file_rename(id, ds->id, ds->pool))) {
+                    apr_file_printf(ds->err, "cannot rename '%s': %pm\n", key, &status);
+                    return status;
+                }
+            }
+        }
+
         return status;
     }
 
@@ -1203,6 +1339,140 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
 }
 
+static apr_status_t device_complete(device_set_t *ds, const char **args)
+{
+    const char *key = NULL, *value = NULL;
+
+    apr_status_t status;
+    int count = 0;
+
+    if (!args[0]) {
+        /* no args is not ok */
+        apr_file_printf(ds->err, "complete needs one or more arguments.\n");
+        return APR_EINVAL;
+    }
+
+    if (ds->id) {
+
+        apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+        int i;
+
+        if (!args[1]) {
+            status = device_id(ds, args[0], options, NULL);
+
+            /* complete on the ids */
+            for (i = 0; i < options->nelts; i++) {
+                const char *option = APR_ARRAY_IDX(options, i, const char *);
+                apr_file_printf(ds->out, "%s\n", option);
+            }
+
+            return status;
+        }
+        else {
+            status = device_id(ds, args[0], options, &ds->id);
+
+            if (APR_SUCCESS != status) {
+                return status;
+            }
+        }
+
+        count = 2;
+    }
+
+    /* find the last key/value pair, or just the key if odd */
+    while(args[count]) {
+        if (!args[count + 1]) {
+            key = args[count + 0];
+            value = NULL;
+            break;
+        }
+        else {
+            key = args[count + 0];
+            value = args[count + 1];
+        }
+        count += 2;
+    }
+
+    if (value) {
+
+        device_pair_t *pair;
+
+        pair = apr_hash_get(ds->pairs, key, APR_HASH_KEY_STRING);
+
+        if (pair) {
+
+            apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+            int i;
+
+            switch (pair->type) {
+            case DEVICE_PAIR_ID:
+                status = device_parse_id(ds, pair, value);
+                break;
+            case DEVICE_PAIR_PORT:
+                status = device_parse_port(ds, pair, value);
+                break;
+            case DEVICE_PAIR_UNPRIVILEGED_PORT:
+                status = device_parse_unprivileged_port(ds, pair, value);
+                break;
+            case DEVICE_PAIR_HOSTNAME:
+                status = device_parse_hostname(ds, pair, value);
+                break;
+            case DEVICE_PAIR_FQDN:
+                status = device_parse_fqdn(ds, pair, value);
+                break;
+            case DEVICE_PAIR_SELECT:
+                status = device_parse_select(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_BYTES:
+                status = device_parse_bytes(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_SYMLINK:
+                status = device_parse_symlink(ds, pair, value, options, NULL);
+                break;
+            default:
+                status = APR_EINVAL;
+            }
+
+            for (i = 0; i < options->nelts; i++) {
+                const char *option = APR_ARRAY_IDX(options, i, const char *);
+                apr_file_printf(ds->out, "%s\n", option);
+            }
+
+        }
+        else {
+            // FIXME: add option for an "overflow" of unknown arguments
+            apr_file_printf(ds->err, "key '%s' is not recognised.\n",
+                    apr_pescape_echo(ds->pool, key, 1));
+            return APR_EINVAL;
+        }
+
+    }
+    else {
+
+        apr_hash_index_t *hi;
+        void *v;
+        device_pair_t *pair;
+
+        for (hi = apr_hash_first(ds->pool, ds->pairs); hi; hi = apr_hash_next(hi)) {
+
+            apr_hash_this(hi, NULL, NULL, &v);
+            pair = v;
+
+            if (!key || !key[0] || !strncmp(key, pair->key, strlen(key))) {
+                apr_file_printf(ds->out, "%c%s=\n",
+                        pair->optional == DEVICE_OPTIONAL ? '-' : '*',
+                        device_pescape_shell(ds->pool, pair->key));
+            }
+
+        }
+
+        status = APR_INCOMPLETE;
+
+    }
+
+    return status;
+}
+
 static apr_status_t device_set(device_set_t *ds, const char **args)
 {
     const char *key = NULL, *val = NULL;
@@ -1212,6 +1482,25 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
     for (len = 0; args && args[len]; len++);
 
     apr_array_header_t *files = apr_array_make(ds->pool, len, sizeof(device_file_t));
+
+    if (ds->id) {
+
+        apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+
+        if (!args[0] || !args[1]) {
+            apr_file_printf(ds->err, "an id is required.\n");
+            return status;
+        }
+        else {
+            status = device_id(ds, args[0], options, &ds->id);
+
+            if (APR_SUCCESS != status) {
+                return status;
+            }
+        }
+
+        args += 2;
+    }
 
     while (args && *args) {
 
@@ -1238,6 +1527,10 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
             file->type = APR_REG;
 
             switch (pair->type) {
+            case DEVICE_PAIR_ID:
+                status = device_parse_id(ds, pair, val);
+                file->type = APR_DIR;
+                break;
             case DEVICE_PAIR_PORT:
                 status = device_parse_port(ds, pair, val);
                 break;
@@ -1357,6 +1650,21 @@ int main(int argc, const char * const argv[])
         case 'h': {
             help(ds.out, argv[0], NULL, 0, cmdline_opts);
             return 0;
+        }
+        case 'i': {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_ID;
+            pair->key = optarg;
+            pair->suffix = DEVICE_NONE;
+            pair->optional = DEVICE_REQUIRED;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            ds.id = optarg;
+
+            break;
         }
         case DEVICE_PORT: {
 

@@ -48,6 +48,7 @@
 #define DEVICE_BYTES_MAX 264
 #define DEVICE_SYMLINK 265
 #define DEVICE_SYMLINK_BASE 266
+#define DEVICE_SYMLINK_SUFFIX 267
 
 #define DEVICE_TXT ".txt"
 #define DEVICE_NONE ""
@@ -68,6 +69,8 @@ typedef struct device_set_t {
     apr_hash_t *pairs;
     const char *path;
     apr_array_header_t *symlink_bases;
+    const char *symlink_suffix;
+    int symlink_suffix_len;
     device_mode_e mode;
 } device_set_t;
 
@@ -153,6 +156,7 @@ static const apr_getopt_option_t
     { "bytes-maximum", DEVICE_BYTES_MAX, 1, "  --bytes-maximum=bytes\t\tUpper limit used by the next bytes option. Zero\n\t\t\t\tfor no limit." },
     { "bytes", DEVICE_BYTES, 1, "  --bytes=name\t\t\tParse a positive integer containing bytes.\n\t\t\t\tOptional modifiers like B, kB, KiB, MB, MiB,\n\t\t\t\tGB, GiB, TB, TiB, PB, PiB, EB, EiB are accepted,\n\t\t\t\tand the given string is expanded into a byte\n\t\t\t\tvalue. Modifiers outside of the specified byte\n\t\t\t\trange are ignored." },
     { "symlink-base", DEVICE_SYMLINK_BASE, 1, "  --symlink-base=path\t\tBase path containing targets for symbolic links.\n\t\t\t\tMore than one path can be specified. In the case\n\t\t\t\tof collision, the earliest match wins." },
+    { "symlink-suffix", DEVICE_SYMLINK_SUFFIX, 1, "  --symlink-suffix=suffix\tLimit targets for symbolic links to this suffix." },
     { "symlink", DEVICE_SYMLINK, 1, "  --symlink=name\t\tParse a selection from a list of files or\n\t\t\t\tdirectories matching the symlink-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
     { NULL }
 };
@@ -904,11 +908,15 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
 
         do {
             const char **possible;
+            char *name;
 
             if (none) {
                 dirent.name = none;
                 dirent.filetype = APR_REG;
+
+                name = apr_pstrdup(ds->pool, dirent.name);
             } else {
+
                 status = apr_dir_read(&dirent,
                         APR_FINFO_TYPE | APR_FINFO_NAME | APR_FINFO_WPROT, thedir);
                 if (APR_STATUS_IS_INCOMPLETE(status)) {
@@ -916,11 +924,26 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
                 } else if (status != APR_SUCCESS) {
                     break;
                 }
-            }
 
-            /* hidden files are ignored */
-            if (dirent.name[0] == '.') {
-                continue;
+                /* hidden files are ignored */
+                if (dirent.name[0] == '.') {
+                    continue;
+                }
+
+                /* suffixes? */
+                if (ds->symlink_suffix) {
+                    int len = strlen(dirent.name);
+                    if (len < ds->symlink_suffix_len
+                            || strcmp(ds->symlink_suffix,
+                                    dirent.name + len - ds->symlink_suffix_len)) {
+                        continue;
+                    }
+                    name = apr_pstrndup(ds->pool, dirent.name,
+                            len - ds->symlink_suffix_len);
+                }
+                else {
+                    name = apr_pstrdup(ds->pool, dirent.name);
+                }
             }
 
             switch (dirent.filetype) {
@@ -928,13 +951,13 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
             case APR_REG:
             case APR_DIR: {
 
-                int exact = (0 == strcmp(arg, dirent.name));
+                int exact = (0 == strcmp(arg, name));
 
                 possible = apr_array_push(possibles);
-                possible[0] = apr_pstrdup(ds->pool, dirent.name);
+                possible[0] = name;
                 poslen += strlen(possible[0]);
 
-                if (!strncmp(arg, dirent.name, arglen)) {
+                if (!strncmp(arg, name, arglen)) {
 
                     const char **opt;
 
@@ -946,7 +969,7 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
                     opt[0] = apr_pstrcat(ds->pool,
                             pair->optional == DEVICE_OPTIONAL ? "-" : "*",
                             device_pescape_shell(ds->pool, pair->key), "=",
-                            device_pescape_shell(ds->pool, dirent.name),
+                            device_pescape_shell(ds->pool, name),
                             NULL);
 
                     if (option) {
@@ -958,7 +981,8 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
                         }
                         else if (APR_SUCCESS
                                 != (status = apr_filepath_merge(&target, base,
-                                        dirent.name, APR_FILEPATH_NATIVE, ds->pool))) {
+                                        apr_pstrcat(ds->pool, name, pair->suffix, NULL),
+                                        APR_FILEPATH_NATIVE, ds->pool))) {
                             apr_file_printf(ds->err, "cannot merge links '%s': %pm\n", pair->key,
                                     &status);
                         }
@@ -2021,7 +2045,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_SYMLINK;
             pair->key = optarg;
-            pair->suffix = DEVICE_NONE;
+            pair->suffix = ds.symlink_suffix ? ds.symlink_suffix  : DEVICE_NONE;
             pair->optional = optional;
             pair->s.bases = ds.symlink_bases;
 
@@ -2041,6 +2065,11 @@ int main(int argc, const char * const argv[])
             base = apr_array_push(ds.symlink_bases);
             base[0]= optarg;
 
+            break;
+        }
+        case DEVICE_SYMLINK_SUFFIX: {
+            ds.symlink_suffix = optarg;
+            ds.symlink_suffix_len = strlen(optarg);
             break;
         }
         }

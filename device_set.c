@@ -54,7 +54,8 @@
 
 typedef enum device_mode_e {
     DEVICE_SET,
-    DEVICE_ADD
+    DEVICE_ADD,
+    DEVICE_REMOVE
 } device_mode_e;
 
 typedef struct device_set_t {
@@ -141,6 +142,7 @@ static const apr_getopt_option_t
     { "optional", 'o', 0, "  -o, --optional\t\tOptions declared after this are optional. This\n\t\t\t\tis the default." },
     { "required", 'r', 0, "  -r, --required\t\tOptions declared after this are required." },
     { "add", 'a', 0, "  -a, --add\t\t\tAdd a new set of options, named by the id\n\t\t\t\toption, which becomes required." },
+    { "remove", 'd', 0, "  -d, --remove\t\t\tRemove a set of options, named by the given\n\t\t\t\tprefix." },
     { "id", 'i', 1, "  -i, --id=name\t\t\tName the set of options. If set, options will\n\t\t\t\tbe written in the subdirectory referred to by\n\t\t\t\tthe first key." },
     { "port", DEVICE_PORT, 1, "  --port=name\t\t\tParse a port. Ports are integers in the range\n\t\t\t\t0 to 65535." },
     { "unprivileged-port", DEVICE_UNPRIVILEGED_PORT, 1, "  --unprivileged-port=name\tParse an unprivileged port. Unprivileged ports\n\t\t\t\tare integers in the range 1025 to 49151." },
@@ -1431,7 +1433,29 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
         count += 2;
     }
 
-    if (value) {
+    if (ds->mode == DEVICE_REMOVE) {
+        if (value) {
+            /* more than one arg is not ok */
+            apr_file_printf(ds->err, "complete has more than one argument.\n");
+            return APR_EINVAL;
+        }
+        else {
+
+            apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+            int i;
+
+            status = device_id(ds, args[0], options, NULL);
+
+            /* complete on the ids */
+            for (i = 0; i < options->nelts; i++) {
+                const char *option = APR_ARRAY_IDX(options, i, const char *);
+                apr_file_printf(ds->out, "%s\n", option);
+            }
+
+            return status;
+        }
+    }
+    else if (value) {
 
         device_pair_t *pair;
 
@@ -1627,6 +1651,187 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
     return status;
 }
 
+static apr_status_t device_remove(device_set_t *ds, const char **args)
+{
+    apr_dir_t *thedir;
+    apr_finfo_t dirent;
+
+    char *pwd;
+    const char *id = NULL, *backup;
+    apr_status_t status = APR_SUCCESS;
+
+    apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+
+    if (!args[0]) {
+        apr_file_printf(ds->err, "an identifier is required.\n");
+        return status;
+    }
+    if (args[1]) {
+        apr_file_printf(ds->err, "no options are permitted.\n");
+        return status;
+    }
+    else {
+        status = device_id(ds, args[0], options, &id);
+
+        if (APR_SUCCESS != status) {
+            return status;
+        }
+    }
+
+    /* save the present working directory */
+    status = apr_filepath_get(&pwd, APR_FILEPATH_NATIVE, ds->pool);
+    if (APR_SUCCESS != status) {
+        apr_file_printf(ds->err, "could not remove '%s' (cwd): %pm\n", id, &status);
+        return status;
+    }
+
+    /*
+     * Remove is dangerous, so we sanity check on first pass.
+     *
+     * Any hidden files, any directories, we don't touch at all.
+     */
+
+    if ((status = apr_dir_open(&thedir, id, ds->pool)) != APR_SUCCESS) {
+
+        /* could not open directory, skip */
+        apr_file_printf(ds->err, "could not remove '%s': %pm\n", id, &status);
+
+        return status;
+    }
+
+    do {
+        status = apr_dir_read(&dirent,
+                APR_FINFO_TYPE | APR_FINFO_NAME | APR_FINFO_WPROT, thedir);
+        if (APR_STATUS_IS_INCOMPLETE(status)) {
+            continue; /* ignore un-stat()able files */
+        } else if (APR_STATUS_IS_ENOENT(status)) {
+            break;
+        } else if (status != APR_SUCCESS) {
+            apr_file_printf(ds->err,
+                    "could not remove '%s' (not accessible): %pm\n", id,
+                    &status);
+            break;
+        }
+
+        /* ignore current and parent, fail on hidden files */
+        if (dirent.name[0] == '.') {
+            if (!dirent.name[1]) {
+                /* "." */
+                continue;
+            }
+            else if (dirent.name[1] == '.' && !dirent.name[2]) {
+                /* ".." */
+                continue;
+            }
+            else {
+                apr_file_printf(ds->err,
+                        "could not remove '%s': unexpected hidden file\n", id);
+                apr_dir_close(thedir);
+                return APR_EINVAL;
+            }
+        }
+
+        switch (dirent.filetype) {
+        case APR_DIR: {
+            apr_file_printf(ds->err,
+                    "could not remove '%s': unexpected directory\n", id);
+            apr_dir_close(thedir);
+            return APR_EINVAL;
+        }
+        default:
+            break;
+        }
+
+    } while (1);
+
+    apr_dir_close(thedir);
+
+    /*
+     * Second step - try rename the directory.
+     *
+     * If we can't do this, give up without touching anything.
+     */
+    backup = apr_psprintf(ds->pool, "%s;%" APR_PID_T_FMT, id, getpid());
+
+    if (APR_SUCCESS != (status = apr_file_rename(id, backup, ds->pool))) {
+        apr_file_printf(ds->err, "could not remove '%s': %pm\n", id, &status);
+        return status;
+    }
+
+    /*
+     * Third step - let's remove the files.
+     *
+     * If we fail here it's too late to recover, but our directory is
+     * moved out the way.
+     */
+
+    /* jump into directory */
+    status = apr_filepath_set(backup, ds->pool);
+    if (APR_SUCCESS != status) {
+        apr_file_printf(ds->err, "could not remove '%s' (chdir): %pm\n", id, &status);
+        return status;
+    }
+
+    if ((status = apr_dir_open(&thedir, ".", ds->pool)) != APR_SUCCESS) {
+        apr_file_printf(ds->err, "could not remove '%s' (open options): %pm\n", id, &status);
+        return status;
+    }
+
+    do {
+        status = apr_dir_read(&dirent,
+                APR_FINFO_TYPE | APR_FINFO_NAME | APR_FINFO_WPROT, thedir);
+        if (APR_STATUS_IS_INCOMPLETE(status)) {
+            continue; /* ignore un-stat()able files */
+        } else if (APR_STATUS_IS_ENOENT(status)) {
+            break;
+        } else if (status != APR_SUCCESS) {
+            apr_file_printf(ds->err,
+                    "could not remove '%s' (read options): %pm\n", id,
+                    &status);
+            break;
+        }
+
+        /* ignore current and parent */
+        if (dirent.name[0] == '.') {
+            if (!dirent.name[1]) {
+                /* "." */
+                continue;
+            }
+            else if (dirent.name[1] == '.' && !dirent.name[2]) {
+                /* ".." */
+                continue;
+            }
+        }
+
+        if (APR_SUCCESS != (status = apr_file_remove(dirent.name, ds->pool))) {
+            apr_file_printf(ds->err, "could not remove '%s' (delete option): %pm\n", id, &status);
+            apr_dir_close(thedir);
+            return status;
+        }
+
+    } while (1);
+
+    apr_dir_close(thedir);
+
+    /* change current working directory */
+    status = apr_filepath_set(pwd, ds->pool);
+    if (APR_SUCCESS != status) {
+        apr_file_printf(ds->err, "could not remove '%s' (chdir): %pm\n", id, &status);
+        return status;
+    }
+
+    /*
+     * Last step - remove that directory.
+     */
+
+    if ((status = apr_dir_remove(backup, ds->pool)) != APR_SUCCESS) {
+        apr_file_printf(ds->err, "could not remove '%s': %pm\n", id, &status);
+        return status;
+    }
+
+    return status;
+}
+
 int main(int argc, const char * const argv[])
 {
     apr_getopt_t *opt;
@@ -1675,6 +1880,10 @@ int main(int argc, const char * const argv[])
         }
         case 'c': {
             complete = 1;
+            break;
+        }
+        case 'd': {
+            ds.mode = DEVICE_REMOVE;
             break;
         }
         case 'o': {
@@ -1860,6 +2069,14 @@ int main(int argc, const char * const argv[])
             exit(1);
         }
 
+    }
+    else if (ds.mode == DEVICE_REMOVE) {
+
+        status = device_remove(&ds, opt->argv + opt->ind);
+
+        if (APR_SUCCESS != status) {
+            exit(1);
+        }
     }
     else {
 

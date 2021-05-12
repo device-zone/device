@@ -1666,7 +1666,7 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
         apr_file_printf(ds->err, "an identifier is required.\n");
         return status;
     }
-    if (args[1]) {
+    if (args[1] && args[2]) {
         apr_file_printf(ds->err, "no options are permitted.\n");
         return status;
     }

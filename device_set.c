@@ -997,7 +997,7 @@ done:
     }
     else if (APR_STATUS_IS_ENOENT(status)) {
 
-        if (option && option[0]) {
+        if (option) {
             if (options->nelts == 1) {
                 /* all ok */
             }
@@ -1143,7 +1143,7 @@ done:
     }
     else if (APR_STATUS_IS_ENOENT(status)) {
 
-        if (option && option[0]) {
+        if (option) {
             if (options->nelts == 1) {
                 /* all ok */
             }

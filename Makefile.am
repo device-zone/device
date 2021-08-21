@@ -1,6 +1,6 @@
 
 ACLOCAL_AMFLAGS = -I m4
-CPPFLAGS += -DPKGSYSCONFDIR='"$(sysconfdir)/$(PACKAGE_NAME)"' -DPKGLIBEXECDIR='"$(pkglibexecdir)"'
+AM_CPPFLAGS = -DPKGSYSCONFDIR='"$(sysconfdir)/$(PACKAGE_NAME)"' -DPKGLIBEXECDIR='"$(pkglibexecdir)"'
 
 if ENABLE_BASH_COMPLETION
 bashcompletiondir = $(BASH_COMPLETION_DIR)

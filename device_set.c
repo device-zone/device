@@ -27,6 +27,7 @@
 #include <apr_lib.h>
 #include <apr_hash.h>
 #include <apr_strings.h>
+#include <apr_xlate.h>
 
 #include "device_util.h"
 
@@ -49,8 +50,13 @@
 #define DEVICE_SYMLINK 265
 #define DEVICE_SYMLINK_BASE 266
 #define DEVICE_SYMLINK_SUFFIX 267
+#define DEVICE_SQL_IDENTIFIER 268
+#define DEVICE_SQL_DELIMITED_IDENTIFIER 269
+#define DEVICE_SQL_IDENTIFIER_MIN 270
+#define DEVICE_SQL_IDENTIFIER_MAX 271
 
 #define DEVICE_TXT ".txt"
+#define DEVICE_SQL ".sql"
 #define DEVICE_NONE ""
 
 typedef enum device_mode_e {
@@ -85,6 +91,8 @@ typedef struct device_set_t {
 #define DEVICE_SELECT_NONE "none"
 #define DEVICE_SYMLINK_MAX 80
 #define DEVICE_SYMLINK_NONE "none"
+#define DEVICE_SQL_IDENTIFIER_DEFAULT_MIN 1
+#define DEVICE_SQL_IDENTIFIER_DEFAULT_MAX 63
 
 #define DEVICE_FILE_UMASK (0x0113)
 
@@ -96,7 +104,9 @@ typedef enum device_pair_e {
     DEVICE_PAIR_FQDN,
     DEVICE_PAIR_SELECT,
     DEVICE_PAIR_BYTES,
-    DEVICE_PAIR_SYMLINK
+    DEVICE_PAIR_SYMLINK,
+    DEVICE_PAIR_SQL_IDENTIFIER,
+    DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -113,6 +123,11 @@ typedef struct device_pair_symlinks_t {
     apr_array_header_t *bases;
 } device_pair_symlinks_t;
 
+typedef struct device_pair_sqlid_t {
+    apr_int64_t min;
+    apr_int64_t max;
+} device_pair_sqlid_t;
+
 typedef struct device_pair_t {
     const char *key;
     const char *suffix;
@@ -121,6 +136,7 @@ typedef struct device_pair_t {
     union {
         device_pair_bytes_t b;
         device_pair_symlinks_t s;
+        device_pair_sqlid_t q;
     };
 } device_pair_t;
 
@@ -158,6 +174,10 @@ static const apr_getopt_option_t
     { "symlink-base", DEVICE_SYMLINK_BASE, 1, "  --symlink-base=path\t\tBase path containing targets for symbolic links.\n\t\t\t\tMore than one path can be specified. In the case\n\t\t\t\tof collision, the earliest match wins." },
     { "symlink-suffix", DEVICE_SYMLINK_SUFFIX, 1, "  --symlink-suffix=suffix\tLimit targets for symbolic links to this suffix." },
     { "symlink", DEVICE_SYMLINK, 1, "  --symlink=name\t\tParse a selection from a list of files or\n\t\t\t\tdirectories matching the symlink-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
+    { "sql-id", DEVICE_SQL_IDENTIFIER, 1, "  --sql-id=id\t\t\tSQL identifier in regular format. Regular\n\t\t\t\tidentifiers start with a letter (a-z, but also\n\t\t\t\tletters with diacritical marks and non-Latin\n\t\t\t\tletters) or an underscore (_). Subsequent\n\t\t\t\tcharacters in an identifier can be letters,\n\t\t\t\tunderscores, or digits (0-9). The resulting value\n\t\t\t\tdoes not need to be SQL escaped before use." },
+    { "sql-delimited-id", DEVICE_SQL_DELIMITED_IDENTIFIER, 1, "  --sql-delimited-id=id\t\tSQL identifier in delimited format. Delimited\n\t\t\t\tidentifiers consist of any UTF8 non-zero character.\n\t\t\t\tThe resulting value must be SQL escaped separately\n\t\t\t\tbefore use." },
+    { "sql-id-minimum", DEVICE_SQL_IDENTIFIER_MIN, 1, "  --sql-id-minimum=chars\t\tMinimum length used by the next sql-id/sql-delimited-id option. Defaults to 1." },
+    { "sql-id-maximum", DEVICE_SQL_IDENTIFIER_MAX, 1, "  --sql-id-maximum=chars\t\tMaximum length used by the next sql-id/sql-delimited-id option. Defaults to 63." },
     { NULL }
 };
 
@@ -503,7 +523,7 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
     }
 
     if (pair->optional == DEVICE_OPTIONAL) {
-        none = DEVICE_SYMLINK_NONE;
+        none = DEVICE_SELECT_NONE;
     }
 
     /* options are in same libexec directory as command */
@@ -1081,6 +1101,189 @@ static apr_status_t device_parse_int64(device_set_t *ds, const char *arg,
     return APR_SUCCESS;
 }
 
+/*
+ * SQL identifier in regular format. Regular identifiers start with a letter (a-z, but
+ * also letters with diacritical marks and non-Latin letters) or an underscore (_).
+ * Subsequent characters in an identifier can be letters, underscores, or digits (0-9).
+ * The resulting value does not need to be SQL escaped before use.
+ */
+static apr_status_t device_parse_sql_identifier(device_set_t *ds, device_pair_t *pair,
+        const char *arg, const char **translated)
+{
+    apr_xlate_t* convset;
+    apr_status_t status;
+    char *out;
+    apr_size_t inbytes, outbytes;
+
+    int len = 0;
+
+    if (!arg || !arg[0]) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    status = apr_xlate_open(&convset, "UTF-8", APR_LOCALE_CHARSET, ds->pool);
+    if (APR_SUCCESS != status) {
+        /* could not open xlate, fail */
+        apr_file_printf(ds->err, "could not open conversion from current locale: %pm\n",
+                &status);
+        return status;
+    }
+
+    inbytes = strlen(arg);
+    outbytes = inbytes * 4 + 1;
+    out = apr_palloc(ds->pool, outbytes);
+
+    status = apr_xlate_conv_buffer(convset, arg, &inbytes, out, &outbytes);
+    if (APR_SUCCESS != status) {
+        /* could not open xlate, fail */
+        apr_file_printf(ds->err, "could not convert from current locale: %pm\n",
+                &status);
+        return status;
+    }
+
+    outbytes = strlen(out);
+
+    if (outbytes < pair->q.min) {
+        /* not ok */
+        apr_file_printf(ds->err,
+                "argument '%s': sql identifier is shorter than %"
+                APR_INT64_T_FMT " characters.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1), pair->q.min);
+        return APR_EINVAL;
+    }
+
+    if (outbytes > pair->q.max) {
+        /* not ok */
+        apr_file_printf(ds->err,
+                "argument '%s': sql identifier is longer than %"
+                APR_INT64_T_FMT " characters.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1), pair->q.max);
+        return APR_EINVAL;
+    }
+
+    while (len < outbytes) {
+        char c = out[len++];
+
+        if (c >= '0' && c <= '9') {
+            if (len == 1) {
+                /* first character cannot be a number */
+                apr_file_printf(ds->err, "argument '%s': first character cannot be a number.\n",
+                        apr_pescape_echo(ds->pool, pair->key, 1));
+                return APR_EINVAL;
+            }
+            else {
+                /* ok */
+            }
+        }
+        else if (c >= 'a' && c <= 'z') {
+            /* ok */
+        }
+        else if (c == '_') {
+            /* ok */
+        }
+        else if (c > 0x7F) {
+            /* ok */
+        }
+        else {
+            /* not ok */
+            apr_file_printf(ds->err, "argument '%s': '%c' is an invalid character.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1), c);
+            return APR_EINVAL;
+        }
+
+    }
+
+    if (translated) {
+        *translated = out;
+    }
+
+    return APR_SUCCESS;
+}
+
+/*
+ * SQL identifier in delimited format. Delimited identifiers consist of any UTF8 non-zero
+ * character. The resulting value must be SQL escaped separately before use.
+ */
+static apr_status_t device_parse_sql_delimited_identifier(device_set_t *ds, device_pair_t *pair,
+        const char *arg, const char **translated)
+{
+    apr_xlate_t* convset;
+    apr_status_t status;
+    char *out;
+    apr_size_t inbytes, outbytes;
+
+    int len = 0;
+
+    if (!arg || !arg[0]) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    status = apr_xlate_open(&convset, "UTF-8", APR_LOCALE_CHARSET, ds->pool);
+    if (APR_SUCCESS != status) {
+        /* could not open xlate, fail */
+        apr_file_printf(ds->err, "could not open conversion from current locale: %pm\n",
+                &status);
+        return status;
+    }
+
+    inbytes = strlen(arg);
+    outbytes = inbytes * 4 + 1;
+    out = apr_palloc(ds->pool, outbytes);
+
+    status = apr_xlate_conv_buffer(convset, arg, &inbytes, out, &outbytes);
+    if (APR_SUCCESS != status) {
+        /* could not open xlate, fail */
+        apr_file_printf(ds->err, "could not convert from current locale: %pm\n",
+                &status);
+        return status;
+    }
+
+    outbytes = strlen(out);
+
+    if (outbytes < pair->q.min) {
+        /* not ok */
+        apr_file_printf(ds->err,
+                "argument '%s': sql identifier is shorter than %"
+                APR_INT64_T_FMT " characters.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1), pair->q.min);
+        return APR_EINVAL;
+    }
+
+    if (outbytes > pair->q.max) {
+        /* not ok */
+        apr_file_printf(ds->err,
+                "argument '%s': sql identifier is longer than %"
+                APR_INT64_T_FMT " characters.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1), pair->q.max);
+        return APR_EINVAL;
+    }
+
+    while (len < outbytes) {
+        char c = out[len++];
+
+        if (c > 0) {
+            /* ok */
+        }
+        else {
+            /* not ok */
+            apr_file_printf(ds->err, "argument '%s': '%c' is an invalid character.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1), c);
+            return APR_EINVAL;
+        }
+
+    }
+
+    if (translated) {
+        *translated = out;
+    }
+
+    return APR_SUCCESS;
+}
+
 static apr_status_t device_id(device_set_t *ds, const char *arg,
         apr_array_header_t *options, const char **option)
 {
@@ -1515,6 +1718,13 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             case DEVICE_PAIR_SYMLINK:
                 status = device_parse_symlink(ds, pair, value, options, NULL);
                 break;
+            case DEVICE_PAIR_SQL_IDENTIFIER:
+                status = device_parse_sql_identifier(ds, pair, value, NULL);
+                break;
+            case DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER:
+                status = device_parse_sql_delimited_identifier(ds, pair, value,
+                        NULL);
+                break;
             default:
                 status = APR_EINVAL;
             }
@@ -1638,6 +1848,13 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
             case DEVICE_PAIR_SYMLINK:
                 status = device_parse_symlink(ds, pair, val, options, &val);
                 file->type = APR_LNK;
+                break;
+            case DEVICE_PAIR_SQL_IDENTIFIER:
+                status = device_parse_sql_identifier(ds, pair, val, &val);
+                break;
+            case DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER:
+                status = device_parse_sql_delimited_identifier(ds, pair, val,
+                        &val);
                 break;
             }
 
@@ -1871,6 +2088,9 @@ int main(int argc, const char * const argv[])
     apr_int64_t bytes_min = 0;
     apr_int64_t bytes_max = 0;
 
+    apr_int64_t sqlid_min = DEVICE_SQL_IDENTIFIER_DEFAULT_MIN;
+    apr_int64_t sqlid_max = DEVICE_SQL_IDENTIFIER_DEFAULT_MAX;
+
     /* lets get APR off the ground, and make sure it terminates cleanly */
     if (APR_SUCCESS != (status = apr_app_initialize(&argc, &argv, NULL))) {
         return 1;
@@ -2070,6 +2290,54 @@ int main(int argc, const char * const argv[])
         case DEVICE_SYMLINK_SUFFIX: {
             ds.symlink_suffix = optarg;
             ds.symlink_suffix_len = strlen(optarg);
+            break;
+        }
+        case DEVICE_SQL_IDENTIFIER: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_SQL_IDENTIFIER;
+            pair->key = optarg;
+            pair->suffix = DEVICE_SQL;
+            pair->optional = optional;
+            pair->q.min = sqlid_min;
+            pair->q.max = sqlid_max;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_SQL_DELIMITED_IDENTIFIER: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT;
+            pair->optional = optional;
+            pair->q.min = sqlid_min;
+            pair->q.max = sqlid_max;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_SQL_IDENTIFIER_MIN: {
+
+            status = device_parse_int64(&ds, optarg, &sqlid_min);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_SQL_IDENTIFIER_MAX: {
+
+            status = device_parse_int64(&ds, optarg, &sqlid_max);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
+
             break;
         }
         }

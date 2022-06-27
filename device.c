@@ -130,7 +130,7 @@ static int help(apr_file_t *out, const char *name, const char *msg, int code,
             "  The following environment variables will modify the behaviour of the device\n"
             "  shell.\n"
             "\n"
-            "  " DEVICE_ENV_EDITLINE "\tSet the editline library. Must be one of:"
+            "  " DEVICE_ENV_EDITLINE "\tSet the editline library. Must be one\n\t\t\tof:"
 #ifdef HAVE_HISTEDIT_H
                     " " DEVICE_LIBEDIT
 #endif

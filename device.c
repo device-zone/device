@@ -110,9 +110,13 @@ static int help(apr_file_t *out, const char *name, const char *msg, int code,
             "  %s [-v] [-h] [-f file] [commands ...]\n"
             "\n"
             "DESCRIPTION\n"
-            "  The device shell allows declarative configuration of a system through an\n"
-            "  interactive interface. If a file is provided, configuration is read from\n"
-            "  the file.\n"
+            "  The device shell allows declarative configuration of a system. If commands\n"
+            "  are specified, the configuration will be displayed or updated. If no commands\n"
+            "  are specified, commands are entered through an interactive interface. If a\n"
+            "  file is provided, configuration is read from the file.\n"
+            "\n"
+            "  Where supported by the shell or interactive interface, tab completion can be\n"
+            "  used to discover valid commands and their options.\n"
             "\n"
             "OPTIONS\n", msg ? msg : "", n, n);
 
@@ -122,6 +126,28 @@ static int help(apr_file_t *out, const char *name, const char *msg, int code,
     }
 
     apr_file_printf(out,
+            "ENVIRONMENT VARIABLES\n"
+            "  The following environment variables will modify the behaviour of the device\n"
+            "  shell.\n"
+            "\n"
+            "  " DEVICE_ENV_EDITLINE "\tSet the editline library. Must be one of:"
+#ifdef HAVE_HISTEDIT_H
+                    " " DEVICE_LIBEDIT
+#endif
+#ifdef HAVE_EDITLINE_H
+                    " " DEVICE_EDITLINE
+#endif
+#ifdef HAVE_REPLXX_H
+                    " " DEVICE_REPLXX
+#endif
+#ifdef HAVE_LINENOISE_H
+                    " " DEVICE_LINENOISE
+#endif
+            "\n"
+            "  " DEVICE_PKGLIBEXECDIR "\tLocation of commands and supporting options. Defaults\n\t\t\tto " DEFAULT_PKGLIBEXECDIR ".\n"
+            "  " DEVICE_PKGSYSCONFDIR "\tLocation of current configuration. Defaults\n\t\t\tto " DEFAULT_PKGSYSCONFDIR ".\n"
+
+            "\n"
             "RETURN VALUE\n"
             "  The device shell returns a non zero exit code if the configuration cannot\n"
             "  be read.\n"

@@ -2505,26 +2505,48 @@ int main(int argc, const char * const argv[])
 
     /* override the default based on the environment */
     else if (editline) {
+        if (0) {
+            /* do nothing */
+        }
 #ifdef HAVE_HISTEDIT_H
-        if (!strcmp(editline, DEVICE_LIBEDIT)) {
+        else if (!strcmp(editline, DEVICE_LIBEDIT)) {
             lines = DEVICE_PREFER_LIBEDIT;
         }
 #endif
 #ifdef HAVE_EDITLINE_H
-        if (!strcmp(editline, DEVICE_EDITLINE)) {
+        else if (!strcmp(editline, DEVICE_EDITLINE)) {
             lines = DEVICE_PREFER_EDITLINE;
         }
 #endif
 #ifdef HAVE_REPLXX_H
-        if (!strcmp(editline, DEVICE_REPLXX)) {
+        else if (!strcmp(editline, DEVICE_REPLXX)) {
             lines = DEVICE_PREFER_REPLXX;
         }
 #endif
 #ifdef HAVE_LINENOISE_H
-        if (!strcmp(editline, DEVICE_LINENOISE)) {
+        else if (!strcmp(editline, DEVICE_LINENOISE)) {
             lines = DEVICE_PREFER_LINENOISE;
         }
 #endif
+        else {
+            apr_file_printf(d.err,
+                    "DEVICE_EDITLINE value '%s' is not supported. Must be one of:"
+#ifdef HAVE_HISTEDIT_H
+                    " " DEVICE_LIBEDIT
+#endif
+#ifdef HAVE_EDITLINE_H
+                    " " DEVICE_EDITLINE
+#endif
+#ifdef HAVE_REPLXX_H
+                    " " DEVICE_REPLXX
+#endif
+#ifdef HAVE_LINENOISE_H
+                    " " DEVICE_LINENOISE
+#endif
+                    "\n", editline);
+            apr_pool_destroy(d.pool);
+            exit(1);
+        }
     }
 
     /* read from a file? */

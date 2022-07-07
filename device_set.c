@@ -45,25 +45,29 @@
 #define DEVICE_HOSTNAME 259
 #define DEVICE_FQDN 260
 #define DEVICE_SELECT 261
-#define DEVICE_BYTES 262
-#define DEVICE_BYTES_MIN 263
-#define DEVICE_BYTES_MAX 264
-#define DEVICE_SYMLINK 265
-#define DEVICE_SYMLINK_BASE 266
-#define DEVICE_SYMLINK_SUFFIX 267
-#define DEVICE_SQL_IDENTIFIER 268
-#define DEVICE_SQL_DELIMITED_IDENTIFIER 269
-#define DEVICE_SQL_IDENTIFIER_MIN 270
-#define DEVICE_SQL_IDENTIFIER_MAX 271
+#define DEVICE_SELECT_BASE 262
+#define DEVICE_BYTES 263
+#define DEVICE_BYTES_MIN 264
+#define DEVICE_BYTES_MAX 265
+#define DEVICE_SYMLINK 266
+#define DEVICE_SYMLINK_BASE 267
+#define DEVICE_SYMLINK_SUFFIX 268
+#define DEVICE_SQL_IDENTIFIER 269
+#define DEVICE_SQL_DELIMITED_IDENTIFIER 270
+#define DEVICE_SQL_IDENTIFIER_MIN 271
+#define DEVICE_SQL_IDENTIFIER_MAX 272
 
 #define DEVICE_TXT ".txt"
 #define DEVICE_SQL ".sql"
 #define DEVICE_NONE ""
 
+#define DEVICE_MARKER "deleteme"
+
 typedef enum device_mode_e {
     DEVICE_SET,
     DEVICE_ADD,
-    DEVICE_REMOVE
+    DEVICE_REMOVE,
+    DEVICE_MARK
 } device_mode_e;
 
 typedef struct device_set_t {
@@ -74,14 +78,17 @@ typedef struct device_set_t {
     apr_file_t *out;
     const char *key;
     const char *keypath;
+    const char *keyval;
     apr_hash_t *pairs;
     const char *path;
+    apr_array_header_t *select_bases;
     apr_array_header_t *symlink_bases;
     const char *symlink_suffix;
     int symlink_suffix_len;
     device_mode_e mode;
 } device_set_t;
 
+#define DEVICE_ERROR_MAX 80
 #define DEVICE_ID_MAX 255
 #define DEVICE_PORT_MIN 0
 #define DEVICE_PORT_MAX 65535
@@ -115,6 +122,15 @@ typedef enum device_optional_e {
     DEVICE_REQUIRED
 } device_optional_e;
 
+typedef enum device_index_e {
+    DEVICE_NORMAL,
+    DEVICE_INDEX
+} device_index_e;
+
+typedef struct device_pair_selects_t {
+    apr_array_header_t *bases;
+} device_pair_selects_t;
+
 typedef struct device_pair_bytes_t {
     apr_int64_t min;
     apr_int64_t max;
@@ -134,8 +150,10 @@ typedef struct device_pair_t {
     const char *suffix;
     device_pair_e type;
     device_optional_e optional;
+    device_index_e index;
     union {
         device_pair_bytes_t b;
+        device_pair_selects_t sl;
         device_pair_symlinks_t s;
         device_pair_sqlid_t q;
     };
@@ -147,6 +165,7 @@ typedef struct device_file_t {
     const char *dest;
     const char *backup;
     const char *val;
+    device_index_e index;
     apr_filetype_e type;
 } device_file_t;
 
@@ -163,11 +182,13 @@ static const apr_getopt_option_t
     { "required", 'r', 0, "  -r, --required\t\tOptions declared after this are required." },
     { "add", 'a', 1, "  -a, --add=name\t\tAdd a new set of options, named by the key\n\t\t\t\tspecified, which becomes required." },
     { "remove", 'd', 1, "  -d, --remove=name\t\tRemove a set of options, named by the key\n\t\t\t\tspecified." },
+    { "mark", 'm', 1, "  -m, --mark=name\t\tMark a set of options for removal, named by the key\n\t\t\t\tspecified." },
     { "set", 's', 1, "  -s, --set\t\t\tSet an option among a set of options, named by\n\t\t\t\tthe key specified." },
     { "port", DEVICE_PORT, 1, "  --port=name\t\t\tParse a port. Ports are integers in the range\n\t\t\t\t0 to 65535." },
     { "unprivileged-port", DEVICE_UNPRIVILEGED_PORT, 1, "  --unprivileged-port=name\tParse an unprivileged port. Unprivileged ports\n\t\t\t\tare integers in the range 1025 to 49151." },
     { "hostname", DEVICE_HOSTNAME, 1, "  --hostname=name\t\tParse a hostname. Hostnames consist of the\n\t\t\t\tcharacters a-z, 0-9, or a hyphen. Hostname\n\t\t\t\tcannot start with a hyphen." },
     { "fqdn", DEVICE_FQDN, 1, "  --fqdn=name\t\t\tParse a fully qualified domain name. FQDNs\n\t\t\t\tconsist of labels containing the characters\n\t\t\t\ta-z, 0-9, or a hyphen, and cannot start with\n\t\t\t\ta hyphen. Labels are separated by dots, and\n\t\t\t\tthe total length cannot exceed 253 characters." },
+    { "select-base", DEVICE_SELECT_BASE, 1, "  --select-base=file\t\tBase files containing options for possible\n\t\t\t\tselections. More than one file can be specified." },
     { "select", DEVICE_SELECT, 1, "  --select=name\t\t\tParse a selection from a file containing\n\t\t\t\toptions. The file containing options is\n\t\t\t\tsearched relative to the base path, and has\n\t\t\t\tthe same name as the result file. Unambiguous\n\t\t\t\tprefix matches are accepted." },
     { "bytes-minimum", DEVICE_BYTES_MIN, 1, "  --bytes-minimum=bytes\t\tLower limit used by the next bytes option. Zero\n\t\t\t\tfor no limit." },
     { "bytes-maximum", DEVICE_BYTES_MAX, 1, "  --bytes-maximum=bytes\t\tUpper limit used by the next bytes option. Zero\n\t\t\t\tfor no limit." },
@@ -225,11 +246,14 @@ static int help(apr_file_t *out, const char *name, const char *msg, int code,
             "  The device shell returns a non zero exit code on error.\n"
             "\n"
             "EXAMPLES\n"
-            "  In this example, set a host and a port.\n"
+            "  In this example, set a host to the value 'localhost', and a port to\n"
+            "  the value '22'. These values will be saved to files in the current\n"
+            "  directory named 'host.txt' and 'port.txt' respectively.\n"
             "\n"
-            "\t~$ device-set --hostname host --port port -- host=localhost port=22\n"
+            "\t~$ device-set --hostname host --port port -- host localhost port 22\n"
             "\n"
-            "  Here we perform command line completion on the given option.\n"
+            "  Here we perform command line completion on the given option. Note that\n"
+            "  the option passed is empty, and thus matches both possible options.\n"
             "\n"
             "\t~$ device-set --hostname host --port port -c ''\n"
             "\thost\n"
@@ -253,6 +277,46 @@ static int abortfunc(int retcode)
     fprintf(stderr, "Out of memory.\n");
 
     return retcode;
+}
+
+static void device_error_possibles(device_set_t *ds, const char *arg, apr_array_header_t *possibles)
+{
+    if (possibles->nelts && possibles->nelts < DEVICE_ERROR_MAX) {
+        apr_file_printf(ds->err, "%s: must be one of: %s\n",
+            apr_pescape_echo(ds->pool, arg, 1),
+            apr_array_pstrcat(ds->pool, possibles, ','));
+    }
+    else {
+        apr_file_printf(ds->err, "%s: value does not match.\n",
+            apr_pescape_echo(ds->pool, arg, 1));
+    }
+}
+
+/*
+ * Map string to a safe filename.
+ *
+ * Remove invalid characters from the name of the file.
+ */
+static const char *device_safename(apr_pool_t *pool, const char *name)
+{
+    char *safe = apr_palloc(pool, strlen(name) + 1);
+
+    int i;
+
+    for (i = 0; name[i]; i++) {
+
+        switch (name[i]) {
+        case '/':
+        case '\\':
+            safe[i] = '_';
+        default:
+            safe[i] = name[i];
+        }
+    }
+
+    safe[i] = 0;
+
+    return safe;
 }
 
 /*
@@ -452,151 +516,150 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
 {
     const char *none = NULL;
     apr_file_t *in;
-    const char *optname;
-    char *optpath;
     apr_off_t end = 0, start = 0;
     apr_status_t status;
     apr_size_t arglen = arg ? strlen(arg) : 0;
 
+    apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
+
+    int i;
+
     if (option) {
         option[0] = NULL; /* until further notice */
+    }
+
+    if (!pair->sl.bases) {
+        apr_file_printf(ds->err, "no base directory specified for '%s'\n", pair->key);
+        return APR_EGENERAL;
     }
 
     if (pair->optional == DEVICE_OPTIONAL) {
         none = DEVICE_SELECT_NONE;
     }
 
-    /* options are in same libexec directory as command */
-    optname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
-    if (APR_SUCCESS
-            != (status = apr_filepath_merge(&optpath, ds->path,
-                    optname, APR_FILEPATH_SECUREROOT | APR_FILEPATH_TRUENAME, ds->pool))) {
-        apr_file_printf(ds->err, "cannot merge options '%s': %pm\n", pair->key,
-                &status);
-    }
+    for (i = 0; i < pair->sl.bases->nelts; i++) {
 
-    /* open the options */
-    else if (APR_SUCCESS
-            != (status = apr_file_open(&in, optpath, APR_FOPEN_READ,
-                    APR_FPROT_OS_DEFAULT, ds->pool))) {
-        apr_file_printf(ds->err, "cannot open options '%s': %pm\n", pair->key,
-                &status);
-    }
+        const char *base = APR_ARRAY_IDX(pair->sl.bases, i, const char *);
 
-    /* how long are the options? */
-    else if (APR_SUCCESS
-            != (status = apr_file_seek(in, APR_END, &end))) {
-        apr_file_printf(ds->err, "cannot seek end of options '%s': %pm\n", pair->key,
-                &status);
-    }
+        /* open the options */
+        if (APR_SUCCESS
+                != (status = apr_file_open(&in, base, APR_FOPEN_READ,
+                        APR_FPROT_OS_DEFAULT, ds->pool))) {
+            apr_file_printf(ds->err, "cannot open options '%s': %pm\n", pair->key,
+                    &status);
+        }
 
-    /* back to the beginning */
-    else if (APR_SUCCESS
-            != (status = apr_file_seek(in, APR_SET, &start))) {
-        apr_file_printf(ds->err, "cannot seek end of options '%s': %pm\n", pair->key,
-                &status);
-    }
+        /* how long are the options? */
+        else if (APR_SUCCESS
+                != (status = apr_file_seek(in, APR_END, &end))) {
+            apr_file_printf(ds->err, "cannot seek end of options '%s': %pm\n", pair->key,
+                    &status);
+        }
 
-    else {
-        int size = end + 1;
-        char *buffer = apr_palloc(ds->pool, size);
+        /* back to the beginning */
+        else if (APR_SUCCESS
+                != (status = apr_file_seek(in, APR_SET, &start))) {
+            apr_file_printf(ds->err, "cannot seek end of options '%s': %pm\n", pair->key,
+                    &status);
+        }
 
-        apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
+        else {
+            int size = end + 1;
+            char *buffer = apr_palloc(ds->pool, size);
 
-        do {
+            apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
 
-            const char **possible;
-            apr_size_t optlen;
-            int exact;
+            do {
 
-            if (none) {
-                strcpy(buffer, DEVICE_SELECT_NONE);
-            } else {
-                status = apr_file_gets(buffer, size, in);
-                if (status != APR_SUCCESS) {
-                    break;
+                const char **possible;
+                apr_size_t optlen;
+                int exact;
+
+                if (none) {
+                    strcpy(buffer, DEVICE_SELECT_NONE);
+                } else {
+                    status = apr_file_gets(buffer, size, in);
+                    if (status != APR_SUCCESS) {
+                        break;
+                    }
                 }
-            }
-            optlen = strlen(buffer);
+                optlen = strlen(buffer);
 
-            /* chop trailing newline */
-            if (optlen && buffer[optlen - 1] == '\n') {
-                optlen--;
-                buffer[optlen] = 0;
-            }
+                /* chop trailing newline */
+                if (optlen && buffer[optlen - 1] == '\n') {
+                    optlen--;
+                    buffer[optlen] = 0;
+                }
 
-            if (!buffer[0] || buffer[0] == '#' || apr_isspace(buffer[0])) {
-                continue;
-            }
+                if (!buffer[0] || buffer[0] == '#' || apr_isspace(buffer[0])) {
+                    continue;
+                }
 
-            possible = apr_array_push(possibles);
-            possible[0] = apr_pstrdup(ds->pool, buffer);
+                possible = apr_array_push(possibles);
+                possible[0] = apr_pstrdup(ds->pool, buffer);
 
-            exact = (0 == strcmp(arg, buffer));
+                exact = (0 == strcmp(arg, buffer));
 
-            if (!strncmp(arg, buffer, arglen)) {
+                if (!strncmp(arg, buffer, arglen)) {
 
-                const char **opt;
+                    const char **opt;
+
+                    if (exact) {
+                        apr_array_clear(options);
+                    }
+
+                    opt = apr_array_push(options);
+                    opt[0] = apr_pstrcat(ds->pool,
+                            pair->optional == DEVICE_OPTIONAL ? "-" : "*",
+                            device_pescape_shell(ds->pool, pair->key), "=",
+                            device_pescape_shell(ds->pool, buffer),
+                            NULL);
+
+                    if (option) {
+                        if (none) {
+                            option[0] = NULL;
+                        }
+                        else {
+                            option[0] = possible[0];
+                        }
+                    }
+                }
 
                 if (exact) {
-                    apr_array_clear(options);
+                    /* exact matches short circuit */
+                    break;
                 }
 
-                opt = apr_array_push(options);
-                opt[0] = apr_pstrcat(ds->pool,
-                        pair->optional == DEVICE_OPTIONAL ? "-" : "*",
-                        device_pescape_shell(ds->pool, pair->key), "=",
-                        device_pescape_shell(ds->pool, buffer),
-                        NULL);
+                none = NULL;
 
-                if (option) {
-                    if (none) {
-                        option[0] = NULL;
-                    }
-                    else {
-                        option[0] = possible[0];
-                    }
-                }
-            }
+            } while (1);
 
-            if (exact) {
-                /* exact matches short circuit */
+            apr_file_close(in);
+
+            if (APR_SUCCESS == status) {
+                /* short circuit, all good */
                 break;
             }
-
-            none = NULL;
-
-        } while (1);
-
-        apr_file_close(in);
-
-        if (APR_SUCCESS == status) {
-            /* short circuit, all good */
-        }
-        else if (APR_EOF == status) {
-
-            if (option && option[0]) {
-                if (options->nelts == 1) {
-                    /* all ok */
-                }
-                else {
-                    if (end < DEVICE_SELECT_MAX) {
-                        apr_file_printf(ds->err, "argument '%s' must be one of: %s\n",
-                                apr_pescape_echo(ds->pool, pair->key, 1), apr_array_pstrcat(ds->pool, possibles, ','));
-                    }
-                    else {
-                        apr_file_printf(ds->err, "argument '%s': value does not match a valid option.\n",
-                                apr_pescape_echo(ds->pool, pair->key, 1));
-                    }
-                    return APR_INCOMPLETE;
-                }
+            else if (APR_EOF == status) {
+                /* loop around */
+                status = APR_SUCCESS;
             }
+            else {
+                apr_file_printf(ds->err, "cannot read option '%s': %pm\n", pair->key,
+                        &status);
+                return status;
+            }
+        }
 
-            status = APR_SUCCESS;
+    }
+
+    if (option && option[0]) {
+        if (options->nelts == 1) {
+            /* all ok */
         }
         else {
-            apr_file_printf(ds->err, "cannot read option '%s': %pm\n", pair->key,
-                    &status);
+            device_error_possibles(ds, pair->key, possibles);
+            return APR_INCOMPLETE;
         }
     }
 
@@ -820,8 +883,8 @@ static apr_status_t device_parse_bytes(device_set_t *ds, device_pair_t *pair,
     }
 
     /* more than one option, we're incomplete */
-    apr_file_printf(ds->err, "argument '%s' must be one of: %s\n",
-            apr_pescape_echo(ds->pool, pair->key, 1), apr_array_pstrcat(ds->pool, possibles, ','));
+    device_error_possibles(ds, pair->key, possibles);
+
     return APR_INCOMPLETE;
 }
 
@@ -986,14 +1049,8 @@ done:
                 /* all ok */
             }
             else {
-                if (poslen < DEVICE_SYMLINK_MAX) {
-                    apr_file_printf(ds->err, "argument '%s' must be one of: %s\n",
-                            apr_pescape_echo(ds->pool, pair->key, 1), apr_array_pstrcat(ds->pool, possibles, ','));
-                }
-                else {
-                    apr_file_printf(ds->err, "argument '%s': value does not match a valid option.\n",
-                            apr_pescape_echo(ds->pool, pair->key, 1));
-                }
+                device_error_possibles(ds, pair->key, possibles);
+
                 return APR_INCOMPLETE;
             }
         }
@@ -1419,8 +1476,8 @@ done:
                 /* all ok */
             }
             else {
-                apr_file_printf(ds->err, "argument '%s' must be one of: %s\n",
-                        apr_pescape_echo(ds->pool, arg, 1), apr_array_pstrcat(ds->pool, possibles, ','));
+                device_error_possibles(ds, arg, possibles);
+
                 return APR_INCOMPLETE;
             }
         }
@@ -1438,7 +1495,7 @@ done:
 static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 {
     char *pwd;
-    const char *id = NULL, *key = NULL, *keypath = NULL;
+    const char *key = NULL, *keypath = NULL, *keyval = NULL;
     apr_status_t status = APR_SUCCESS;
     int i;
 
@@ -1450,16 +1507,6 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
         return status;
     }
 
-    /* any directory renames or creates? */
-    for (i = 0; i < files->nelts; i++)
-    {
-        device_file_t *file = &APR_ARRAY_IDX(files, i, device_file_t);
-
-        if (file->type == APR_DIR) {
-            id = file->val;
-        }
-    }
-
     if (ds->mode == DEVICE_ADD) {
 
         /* try the directory create */
@@ -1467,6 +1514,8 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
             apr_uuid_t uuid;
             char ustr[APR_UUID_FORMATTED_LENGTH + 1];
+
+            /* test for uniqueness */
 
             apr_uuid_get(&uuid);
             apr_uuid_format(ustr, &uuid);
@@ -1570,6 +1619,10 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
             }
         }
 
+        if (file->index == DEVICE_INDEX) {
+            keyval = file->val;
+        }
+
     }
 
     /* could not write, try to rollback */
@@ -1594,12 +1647,12 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
         }
 
-        if (id) {
+        if (ds->key) {
 
             /* revert to present working directory */
             status = apr_filepath_set(pwd, ds->pool);
             if (APR_SUCCESS != status) {
-                apr_file_printf(ds->err, "cannot revert '%s': %pm\n", id, &status);
+                apr_file_printf(ds->err, "cannot revert '%s': %pm\n", key, &status);
                 return status;
             }
 
@@ -1609,7 +1662,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
                     return status;
                 }
             }
-            else if (ds->key) {
+            else {
 
                 /* implement the undo of the reindex here */
 
@@ -1636,6 +1689,22 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
                 apr_file_printf(ds->err, "cannot remove '%s': %pm\n", file->key, &status);
             }
 
+        }
+
+        /* revert to present working directory */
+        status = apr_filepath_set(pwd, ds->pool);
+        if (APR_SUCCESS != status) {
+            apr_file_printf(ds->err, "cannot create index (cwd): %pm\n", &status);
+            return status;
+        }
+
+        /* too late to back out */
+        if (ds->keyval && keyval) {
+            apr_file_rename(ds->keyval, keyval, ds->pool);
+        }
+
+        else if (keypath && keyval) {
+            symlink(keypath, keyval);
         }
 
         return APR_SUCCESS;
@@ -1856,6 +1925,28 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
         file->template = apr_pstrcat(ds->pool, file->dest, ".XXXXXX", NULL);
         file->key = key;
         file->val = val;
+        file->index = pair->index;
+
+        if (ds->key && !strcmp(ds->key, key)) {
+
+            /* index must be unique */
+
+            int exact = 0;
+
+            apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+
+            status = device_get(ds, val, options, NULL, NULL, &exact);
+
+            if (APR_SUCCESS != status) {
+                return status;
+            }
+
+            if (exact) {
+                apr_file_printf(ds->err, "%s already exists.\n", ds->key);
+                return APR_EINVAL;
+            }
+
+        }
 
     }
     else {
@@ -1935,14 +2026,14 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
 
             apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
 
-            status = device_get(ds, args[0], options, &ds->key, &ds->keypath, &exact);
+            status = device_get(ds, args[0], options, &ds->keyval, &ds->keypath, &exact);
 
             if (APR_SUCCESS != status) {
                 return status;
             }
 
             if (!exact) {
-                apr_file_printf(ds->err, "%s was not found.\n", ds->key);
+                apr_file_printf(ds->err, "%s was not found.\n", args[0]);
                 return APR_EINVAL;
             }
         }
@@ -1991,7 +2082,7 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
     apr_finfo_t dirent;
 
     char *pwd;
-    const char *key = NULL, *keypath = NULL, *backup;
+    const char *keyval = NULL, *keypath = NULL, *backup;
     apr_status_t status = APR_SUCCESS;
 
     apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
@@ -2005,7 +2096,7 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
         return status;
     }
     else {
-        status = device_get(ds, args[0], options, &key, &keypath, NULL);
+        status = device_get(ds, args[0], options, &keyval, &keypath, NULL);
 
         if (APR_SUCCESS != status) {
             return status;
@@ -2015,7 +2106,7 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
     /* save the present working directory */
     status = apr_filepath_get(&pwd, APR_FILEPATH_NATIVE, ds->pool);
     if (APR_SUCCESS != status) {
-        apr_file_printf(ds->err, "could not remove '%s' (cwd): %pm\n", key, &status);
+        apr_file_printf(ds->err, "could not remove '%s' (cwd): %pm\n", keyval, &status);
         return status;
     }
 
@@ -2028,7 +2119,7 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
     if ((status = apr_dir_open(&thedir, keypath, ds->pool)) != APR_SUCCESS) {
 
         /* could not open directory, skip */
-        apr_file_printf(ds->err, "could not remove '%s': %pm\n", key, &status);
+        apr_file_printf(ds->err, "could not remove '%s': %pm\n", keyval, &status);
 
         return status;
     }
@@ -2042,7 +2133,7 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
             break;
         } else if (status != APR_SUCCESS) {
             apr_file_printf(ds->err,
-                    "could not remove '%s' (not accessible): %pm\n", key,
+                    "could not remove '%s' (not accessible): %pm\n", keyval,
                     &status);
             break;
         }
@@ -2059,7 +2150,7 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
             }
             else {
                 apr_file_printf(ds->err,
-                        "could not remove '%s': unexpected hidden file: %s\n", key, dirent.name);
+                        "could not remove '%s': unexpected hidden file: %s\n", keyval, dirent.name);
                 apr_dir_close(thedir);
                 return APR_EINVAL;
             }
@@ -2068,7 +2159,7 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
         switch (dirent.filetype) {
         case APR_DIR: {
             apr_file_printf(ds->err,
-                    "could not remove '%s': unexpected directory: %s\n", key, dirent.name);
+                    "could not remove '%s': unexpected directory: %s\n", keyval, dirent.name);
             apr_dir_close(thedir);
             return APR_EINVAL;
         }
@@ -2088,9 +2179,11 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
     backup = apr_psprintf(ds->pool, "%s;%" APR_PID_T_FMT, keypath, getpid());
 
     if (APR_SUCCESS != (status = apr_file_rename(keypath, backup, ds->pool))) {
-        apr_file_printf(ds->err, "could not remove '%s': %pm\n", key, &status);
+        apr_file_printf(ds->err, "could not remove '%s' (rename): %pm\n", keyval, &status);
         return status;
     }
+
+    apr_file_remove(device_safename(ds->pool, keyval), ds->pool);
 
     /*
      * Third step - let's remove the files.
@@ -2102,12 +2195,12 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
     /* jump into directory */
     status = apr_filepath_set(backup, ds->pool);
     if (APR_SUCCESS != status) {
-        apr_file_printf(ds->err, "could not remove '%s' (chdir): %pm\n", key, &status);
+        apr_file_printf(ds->err, "could not remove '%s' (chdir): %pm\n", keyval, &status);
         return status;
     }
 
     if ((status = apr_dir_open(&thedir, ".", ds->pool)) != APR_SUCCESS) {
-        apr_file_printf(ds->err, "could not remove '%s' (open options): %pm\n", key, &status);
+        apr_file_printf(ds->err, "could not remove '%s' (open options): %pm\n", keyval, &status);
         return status;
     }
 
@@ -2120,7 +2213,7 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
             break;
         } else if (status != APR_SUCCESS) {
             apr_file_printf(ds->err,
-                    "could not remove '%s' (read options): %pm\n", key,
+                    "could not remove '%s' (read options): %pm\n", keyval,
                     &status);
             break;
         }
@@ -2138,7 +2231,7 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
         }
 
         if (APR_SUCCESS != (status = apr_file_remove(dirent.name, ds->pool))) {
-            apr_file_printf(ds->err, "could not remove '%s' (delete option): %pm\n", key, &status);
+            apr_file_printf(ds->err, "could not remove '%s' (delete option): %pm\n", keyval, &status);
             apr_dir_close(thedir);
             return status;
         }
@@ -2150,7 +2243,7 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
     /* change current working directory */
     status = apr_filepath_set(pwd, ds->pool);
     if (APR_SUCCESS != status) {
-        apr_file_printf(ds->err, "could not remove '%s' (chdir): %pm\n", key, &status);
+        apr_file_printf(ds->err, "could not remove '%s' (chdir): %pm\n", keyval, &status);
         return status;
     }
 
@@ -2159,9 +2252,58 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
      */
 
     if ((status = apr_dir_remove(backup, ds->pool)) != APR_SUCCESS) {
-        apr_file_printf(ds->err, "could not remove '%s': %pm\n", key, &status);
+        apr_file_printf(ds->err, "could not remove '%s': %pm\n", keyval, &status);
         return status;
     }
+
+    return status;
+}
+
+static apr_status_t device_mark(device_set_t *ds, const char **args)
+{
+    apr_file_t *out;
+
+    const char *keyval = NULL, *keypath = NULL;
+    apr_status_t status = APR_SUCCESS;
+
+    apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+
+    if (!args[0]) {
+        apr_file_printf(ds->err, "%s is required.\n", ds->key);
+        return status;
+    }
+    if (args[1] && args[2]) {
+        apr_file_printf(ds->err, "no options are permitted other than %s.\n", ds->key);
+        return status;
+    }
+    else {
+        status = device_get(ds, args[0], options, &keyval, &keypath, NULL);
+
+        if (APR_SUCCESS != status) {
+            return status;
+        }
+    }
+
+    if (APR_SUCCESS != (status = apr_filepath_set(keypath, ds->pool))) {
+        apr_file_printf(ds->err, "could not mark '%s' (chdir): %pm\n", keyval, &status);
+    }
+    else if (APR_SUCCESS
+        != (status = apr_file_open(&out, DEVICE_MARKER, APR_FOPEN_CREATE | APR_FOPEN_WRITE,
+            APR_FPROT_OS_DEFAULT, ds->pool))) {
+        apr_file_printf(ds->err, "cannot create mark '%s': %pm\n", keyval,
+            &status);
+    }
+    else if (APR_SUCCESS != (status = apr_file_close(out))) {
+        apr_file_printf(ds->err, "cannot close mark '%s': %pm\n", keyval, &status);
+    }
+    else if (APR_SUCCESS
+            != (status = apr_file_perms_set(DEVICE_MARKER,
+                    APR_FPROT_OS_DEFAULT & ~DEVICE_FILE_UMASK))) {
+        apr_file_printf(ds->err, "cannot set permissions to mark '%s': %pm\n",
+                keyval, &status);
+    }
+
+    apr_file_remove(device_safename(ds->pool, keyval), ds->pool);
 
     return status;
 }
@@ -2170,6 +2312,7 @@ int main(int argc, const char * const argv[])
 {
     apr_getopt_t *opt;
     const char *optarg;
+    device_pair_t *index;
 
     device_set_t ds = { 0 };
 
@@ -2222,6 +2365,11 @@ int main(int argc, const char * const argv[])
         }
         case 'd': {
             ds.mode = DEVICE_REMOVE;
+            ds.key = optarg;
+            break;
+        }
+        case 'm': {
+            ds.mode = DEVICE_MARK;
             ds.key = optarg;
             break;
         }
@@ -2306,8 +2454,23 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT;
             pair->optional = optional;
+            pair->sl.bases = ds.select_bases;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            ds.select_bases = NULL;
+
+            break;
+        }
+        case DEVICE_SELECT_BASE: {
+
+            const char **base;
+
+            if (!ds.select_bases) {
+                ds.select_bases = apr_array_make(ds.pool, 2, sizeof(const char *));
+            }
+            base = apr_array_push(ds.select_bases);
+            base[0]= optarg;
 
             break;
         }
@@ -2427,23 +2590,37 @@ int main(int argc, const char * const argv[])
         }
         }
 
+        if (complete) {
+            break;
+        }
+
     }
     if (APR_SUCCESS != status && APR_EOF != status) {
         return help(ds.err, argv[0], NULL, EXIT_FAILURE, cmdline_opts);
     }
 
-    if (ds.mode == DEVICE_ADD && !apr_hash_get(ds.pairs, ds.key, APR_HASH_KEY_STRING)) {
-        return help(ds.err, argv[0], "The --add parameter was not found on the command line.",
-                EXIT_FAILURE, cmdline_opts);
-    }
+    index = apr_hash_get(ds.pairs, ds.key, APR_HASH_KEY_STRING);
+    if (index) {
 
-    if (ds.mode == DEVICE_REMOVE && !apr_hash_get(ds.pairs, ds.key, APR_HASH_KEY_STRING)) {
-        return help(ds.err, argv[0], "The --remove parameter was not found on the command line.",
-                EXIT_FAILURE, cmdline_opts);
-    }
+        /* index parameter always required */
+        index->optional = DEVICE_REQUIRED;
 
-    if (ds.mode == DEVICE_SET) {
-        if (ds.key && !apr_hash_get(ds.pairs, ds.key, APR_HASH_KEY_STRING)) {
+        /* mark the index */
+        index->index = DEVICE_INDEX;
+
+    }
+    else {
+        if (ds.mode == DEVICE_ADD) {
+            return help(ds.err, argv[0], "The --add parameter was not found on the command line.",
+                    EXIT_FAILURE, cmdline_opts);
+        }
+
+        if (ds.mode == DEVICE_REMOVE) {
+            return help(ds.err, argv[0], "The --remove parameter was not found on the command line.",
+                    EXIT_FAILURE, cmdline_opts);
+        }
+
+        if (ds.mode == DEVICE_SET && ds.key) {
             return help(ds.err, argv[0], "The --set parameter was not found on the command line.",
                     EXIT_FAILURE, cmdline_opts);
         }
@@ -2475,6 +2652,14 @@ int main(int argc, const char * const argv[])
     else if (ds.mode == DEVICE_REMOVE) {
 
         status = device_remove(&ds, opt->argv + opt->ind);
+
+        if (APR_SUCCESS != status) {
+            exit(1);
+        }
+    }
+    else if (ds.mode == DEVICE_MARK) {
+
+        status = device_mark(&ds, opt->argv + opt->ind);
 
         if (APR_SUCCESS != status) {
             exit(1);

@@ -10,7 +10,7 @@ endif
 bin_PROGRAMS = device
 device_SOURCES = device.c device.h device_argv.c device_argv.h device_compgen.c device_compgen.h device_editline.c device_editline.h device_linenoise.c device_linenoise.h device_read.c device_read.h device_replxx.c device_replxx.h device_libedit.c device_libedit.h  device_util.h device_util.c linenoise.c linenoise.h
 
-sbin_PROGRAMS = device-set
+libexec_PROGRAMS = device-set
 device_set_SOURCES = device_set.c device_util.h device_util.c
 
 EXTRA_DIST = device.spec

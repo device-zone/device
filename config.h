@@ -8,7 +8,7 @@
 /* #undef HAVE_EDITLINE_H */
 
 /* Define to 1 if you have the <histedit.h> header file. */
-#define HAVE_HISTEDIT_H 1
+/* #undef HAVE_HISTEDIT_H */
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #define HAVE_INTTYPES_H 1
@@ -23,7 +23,7 @@
 #define HAVE_LIBGEN_H 1
 
 /* Define to 1 if you have the `replxx' library (-lreplxx). */
-#define HAVE_LIBREPLXX 1
+/* #undef HAVE_LIBREPLXX */
 
 /* Have the linenoise header files */
 /* #undef HAVE_LINENOISE_H */
@@ -32,20 +32,20 @@
    to 0 otherwise. */
 #define HAVE_MALLOC 1
 
+/* Define to 1 if you have the <memory.h> header file. */
+#define HAVE_MEMORY_H 1
+
 /* Define to 1 if you have the `replxx_add_color_completion' function. */
-#define HAVE_REPLXX_ADD_COLOR_COMPLETION 1
+/* #undef HAVE_REPLXX_ADD_COLOR_COMPLETION */
 
 /* Define to 1 if you have the <replxx.h> header file. */
-#define HAVE_REPLXX_H 1
+/* #undef HAVE_REPLXX_H */
 
 /* Define to 1 if stdbool.h conforms to C99. */
 #define HAVE_STDBOOL_H 1
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #define HAVE_STDINT_H 1
-
-/* Define to 1 if you have the <stdio.h> header file. */
-#define HAVE_STDIO_H 1
 
 /* Define to 1 if you have the <stdlib.h> header file. */
 #define HAVE_STDLIB_H 1
@@ -98,9 +98,7 @@
 /* Define to the version of this package. */
 #define PACKAGE_VERSION "0.9.0"
 
-/* Define to 1 if all of the C90 standard headers exist (not just the ones
-   required in a freestanding environment). This macro is provided for
-   backward compatibility; new code need not use it. */
+/* Define to 1 if you have the ANSI C header files. */
 #define STDC_HEADERS 1
 
 /* Version number of package */
@@ -120,7 +118,7 @@
 /* Define to rpl_malloc if the replacement function should be used. */
 /* #undef malloc */
 
-/* Define as a signed integer type capable of holding a process identifier. */
+/* Define to `int' if <sys/types.h> does not define. */
 /* #undef pid_t */
 
 /* Define to `unsigned int' if <sys/types.h> does not define. */

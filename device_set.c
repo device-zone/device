@@ -61,7 +61,8 @@
 #define DEVICE_SQL ".sql"
 #define DEVICE_NONE ""
 
-#define DEVICE_MARKER "deleteme"
+#define DEVICE_ADD_MARKER "addme"
+#define DEVICE_REMOVE_MARKER "removeme"
 
 typedef enum device_mode_e {
     DEVICE_SET,
@@ -1512,6 +1513,8 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
         /* try the directory create */
         if (ds->key) {
 
+            apr_file_t *out;
+
             apr_uuid_t uuid;
             char ustr[APR_UUID_FORMATTED_LENGTH + 1];
 
@@ -1531,7 +1534,25 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
             /* change current working directory */
             status = apr_filepath_set(ustr, ds->pool);
             if (APR_SUCCESS != status) {
-                apr_file_printf(ds->err, "cannot access '%s': %pm\n", ds->key, &status);
+                apr_file_printf(ds->err, "cannot access '%s' (chdir): %pm\n", ds->key, &status);
+                return status;
+            }
+            else if (APR_SUCCESS
+                != (status = apr_file_open(&out, DEVICE_ADD_MARKER, APR_FOPEN_CREATE | APR_FOPEN_WRITE,
+                    APR_FPROT_OS_DEFAULT, ds->pool))) {
+                apr_file_printf(ds->err, "cannot create mark '%s': %pm\n", keyval,
+                    &status);
+                return status;
+            }
+            else if (APR_SUCCESS != (status = apr_file_close(out))) {
+                apr_file_printf(ds->err, "cannot close mark '%s': %pm\n", keyval, &status);
+                return status;
+            }
+            else if (APR_SUCCESS
+                    != (status = apr_file_perms_set(DEVICE_ADD_MARKER,
+                            APR_FPROT_OS_DEFAULT & ~DEVICE_FILE_UMASK))) {
+                apr_file_printf(ds->err, "cannot set permissions to mark '%s': %pm\n",
+                        keyval, &status);
                 return status;
             }
 
@@ -2288,7 +2309,7 @@ static apr_status_t device_mark(device_set_t *ds, const char **args)
         apr_file_printf(ds->err, "could not mark '%s' (chdir): %pm\n", keyval, &status);
     }
     else if (APR_SUCCESS
-        != (status = apr_file_open(&out, DEVICE_MARKER, APR_FOPEN_CREATE | APR_FOPEN_WRITE,
+        != (status = apr_file_open(&out, DEVICE_REMOVE_MARKER, APR_FOPEN_CREATE | APR_FOPEN_WRITE,
             APR_FPROT_OS_DEFAULT, ds->pool))) {
         apr_file_printf(ds->err, "cannot create mark '%s': %pm\n", keyval,
             &status);
@@ -2297,7 +2318,7 @@ static apr_status_t device_mark(device_set_t *ds, const char **args)
         apr_file_printf(ds->err, "cannot close mark '%s': %pm\n", keyval, &status);
     }
     else if (APR_SUCCESS
-            != (status = apr_file_perms_set(DEVICE_MARKER,
+            != (status = apr_file_perms_set(DEVICE_REMOVE_MARKER,
                     APR_FPROT_OS_DEFAULT & ~DEVICE_FILE_UMASK))) {
         apr_file_printf(ds->err, "cannot set permissions to mark '%s': %pm\n",
                 keyval, &status);

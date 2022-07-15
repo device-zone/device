@@ -1729,6 +1729,40 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
     if (ds->mode == DEVICE_ADD) {
 
+        apr_hash_index_t *hi;
+        void *v;
+        device_pair_t *pair;
+
+        /* check for required options that remain unset */
+
+        for (hi = apr_hash_first(ds->pool, ds->pairs); hi; hi = apr_hash_next(hi)) {
+
+            apr_hash_this(hi, NULL, NULL, &v);
+            pair = v;
+
+            if (pair->optional == DEVICE_REQUIRED) {
+
+                int found = 0;
+
+                for (i = 0; i < files->nelts; i++)
+                {
+                    device_file_t *file = &APR_ARRAY_IDX(files, i, device_file_t);
+
+                    if (!strcmp(pair->key, file->key)) {
+                        found = 1;
+                        break;
+                    }
+                }
+
+                if (!found) {
+                    apr_file_printf(ds->err, "'%s' is required.\n",
+                            apr_pescape_echo(ds->pool, pair->key, 1));
+                    return APR_EINVAL;
+                }
+            }
+
+        }
+
         /* try the directory create */
         if (ds->key) {
 
@@ -2192,6 +2226,12 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
                 return APR_EINVAL;
             }
 
+        }
+
+        if (pair->optional == DEVICE_REQUIRED && !file->val) {
+            apr_file_printf(ds->err, "'%s' is required, and cannot be unset.\n",
+                    apr_pescape_echo(ds->pool, key, 1));
+            return APR_EINVAL;
         }
 
     }

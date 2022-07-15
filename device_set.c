@@ -1424,7 +1424,6 @@ static apr_status_t device_parse_user(device_set_t *ds, device_pair_t *pair,
 
                     const char *user;
                     const char **possible;
-                    apr_size_t optlen;
 
                     if (none) {
                         user = none;
@@ -1435,8 +1434,6 @@ static apr_status_t device_parse_user(device_set_t *ds, device_pair_t *pair,
                     if (!user) {
                         break;
                     }
-
-                    optlen = strlen(user);
 
                     possible = apr_array_push(possibles);
                     possible[0] = apr_pstrdup(ds->pool, user);

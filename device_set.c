@@ -1307,8 +1307,6 @@ static apr_status_t device_parse_user(device_set_t *ds, device_pair_t *pair,
         const char *arg, apr_array_header_t *options, const char **option)
 {
     const char *none = NULL;
-    apr_file_t *in;
-    apr_off_t end = 0, start = 0;
     apr_status_t status;
     apr_size_t arglen = arg ? strlen(arg) : 0;
 
@@ -1336,7 +1334,6 @@ static apr_status_t device_parse_user(device_set_t *ds, device_pair_t *pair,
 
             const char *user;
             const char **possible;
-            apr_size_t optlen;
 
             if (none) {
 
@@ -1360,8 +1357,6 @@ static apr_status_t device_parse_user(device_set_t *ds, device_pair_t *pair,
 
                 user = pwd->pw_name;
             }
-
-            optlen = strlen(user);
 
             possible = apr_array_push(possibles);
             possible[0] = apr_pstrdup(ds->pool, user);

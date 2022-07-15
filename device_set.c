@@ -39,6 +39,13 @@
 #include <sys/types.h>
 #include <unistd.h>
 #endif
+#if HAVE_GRP_H
+#include <grp.h>
+#endif
+#if HAVE_PWD_H
+#include <sys/types.h>
+#include <pwd.h>
+#endif
 
 #define DEVICE_PORT 257
 #define DEVICE_UNPRIVILEGED_PORT 258
@@ -56,6 +63,8 @@
 #define DEVICE_SQL_DELIMITED_IDENTIFIER 270
 #define DEVICE_SQL_IDENTIFIER_MIN 271
 #define DEVICE_SQL_IDENTIFIER_MAX 272
+#define DEVICE_USER_GROUP 273
+#define DEVICE_USER 274
 
 #define DEVICE_TXT ".txt"
 #define DEVICE_SQL ".sql"
@@ -82,6 +91,7 @@ typedef struct device_set_t {
     const char *keyval;
     apr_hash_t *pairs;
     const char *path;
+    apr_array_header_t *user_groups;
     apr_array_header_t *select_bases;
     apr_array_header_t *symlink_bases;
     const char *symlink_suffix;
@@ -103,7 +113,6 @@ typedef struct device_set_t {
 #define DEVICE_SYMLINK_NONE "none"
 #define DEVICE_SQL_IDENTIFIER_DEFAULT_MIN 1
 #define DEVICE_SQL_IDENTIFIER_DEFAULT_MAX 63
-
 #define DEVICE_FILE_UMASK (0x0113)
 
 typedef enum device_pair_e {
@@ -115,7 +124,8 @@ typedef enum device_pair_e {
     DEVICE_PAIR_BYTES,
     DEVICE_PAIR_SYMLINK,
     DEVICE_PAIR_SQL_IDENTIFIER,
-    DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER
+    DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER,
+    DEVICE_PAIR_USER
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -146,6 +156,10 @@ typedef struct device_pair_sqlid_t {
     apr_int64_t max;
 } device_pair_sqlid_t;
 
+typedef struct device_pair_users_t {
+    apr_array_header_t *groups;
+} device_pair_users_t;
+
 typedef struct device_pair_t {
     const char *key;
     const char *suffix;
@@ -157,6 +171,7 @@ typedef struct device_pair_t {
         device_pair_selects_t sl;
         device_pair_symlinks_t s;
         device_pair_sqlid_t q;
+        device_pair_users_t u;
     };
 } device_pair_t;
 
@@ -201,6 +216,8 @@ static const apr_getopt_option_t
     { "sql-delimited-id", DEVICE_SQL_DELIMITED_IDENTIFIER, 1, "  --sql-delimited-id=id\t\tSQL identifier in delimited format. Delimited\n\t\t\t\tidentifiers consist of any UTF8 non-zero character.\n\t\t\t\tThe resulting value must be SQL escaped separately\n\t\t\t\tbefore use." },
     { "sql-id-minimum", DEVICE_SQL_IDENTIFIER_MIN, 1, "  --sql-id-minimum=chars\tMinimum length used by the next\n\t\t\t\tsql-id/sql-delimited-id option. Defaults to 1." },
     { "sql-id-maximum", DEVICE_SQL_IDENTIFIER_MAX, 1, "  --sql-id-maximum=chars\tMaximum length used by the next\n\t\t\t\tsql-id/sql-delimited-id option. Defaults to 63." },
+    { "user-group", DEVICE_USER_GROUP, 1, "  --unix-group=name\t\tLimit usernames to members of the given group. May\n\t\t\t\tbe specified more than once." },
+    { "user", DEVICE_USER, 1, "  --user=name\t\t\tParse a user that exists on the system." },
     { NULL }
 };
 
@@ -1282,6 +1299,216 @@ static apr_status_t device_parse_sql_delimited_identifier(device_set_t *ds, devi
     return APR_SUCCESS;
 }
 
+/**
+ * User is a string which must match one of a series of existing users,
+ * potentially limited to one or more groups.
+ */
+static apr_status_t device_parse_user(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    const char *none = NULL;
+    apr_file_t *in;
+    apr_off_t end = 0, start = 0;
+    apr_status_t status;
+    apr_size_t arglen = arg ? strlen(arg) : 0;
+
+    apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
+
+    int i, j;
+
+    int exact = 0;
+
+    if (option) {
+        option[0] = NULL; /* until further notice */
+    }
+
+    if (pair->optional == DEVICE_OPTIONAL) {
+        none = DEVICE_SELECT_NONE;
+    }
+
+    if (!pair->u.groups) {
+
+        struct passwd *pwd;
+
+        setpwent();
+
+        do {
+
+            const char *user;
+            const char **possible;
+            apr_size_t optlen;
+
+            if (none) {
+
+                user = none;
+
+            } else {
+
+                apr_set_os_error(0);
+                pwd = getpwent();
+                status = apr_get_os_error();
+
+                if (APR_SUCCESS != status) {
+                    apr_file_printf(ds->err, "cannot read users '%s': %pm\n", pair->key,
+                            &status);
+                    break;
+                }
+
+                if (!pwd) {
+                    break;
+                }
+
+                user = pwd->pw_name;
+            }
+
+            optlen = strlen(user);
+
+            possible = apr_array_push(possibles);
+            possible[0] = apr_pstrdup(ds->pool, user);
+
+            exact = (0 == strcmp(arg, user));
+
+            if (!strncmp(arg, user, arglen)) {
+
+                const char **opt;
+
+                if (exact) {
+                    apr_array_clear(options);
+                }
+
+                opt = apr_array_push(options);
+                opt[0] = apr_pstrcat(ds->pool,
+                        pair->optional == DEVICE_OPTIONAL ? "-" : "*",
+                        device_pescape_shell(ds->pool, pair->key), "=",
+                        device_pescape_shell(ds->pool, user),
+                        NULL);
+
+                if (option) {
+                    if (none) {
+                        option[0] = NULL;
+                    }
+                    else {
+                        option[0] = possible[0];
+                    }
+                }
+            }
+
+            if (exact) {
+                /* exact matches short circuit */
+                break;
+            }
+
+            none = NULL;
+
+        } while (1);
+
+        endpwent();
+
+    }
+    else {
+
+        for (i = 0; i < pair->u.groups->nelts; i++) {
+
+            struct group *gr;
+
+            const char *group = APR_ARRAY_IDX(pair->u.groups, i, const char *);
+
+            apr_set_os_error(0);
+            gr = getgrnam(group);
+            status = apr_get_os_error();
+
+            if (APR_SUCCESS != status) {
+                apr_file_printf(ds->err, "cannot read groups '%s': %pm\n", pair->key,
+                        &status);
+            }
+            else if (gr && gr->gr_mem) {
+
+                j = 0;
+
+                do {
+
+                    const char *user;
+                    const char **possible;
+                    apr_size_t optlen;
+
+                    if (none) {
+                        user = none;
+                    } else {
+                        user = gr->gr_mem[j++];
+                    }
+
+                    if (!user) {
+                        break;
+                    }
+
+                    optlen = strlen(user);
+
+                    possible = apr_array_push(possibles);
+                    possible[0] = apr_pstrdup(ds->pool, user);
+
+                    exact = (0 == strcmp(arg, user));
+
+                    if (!strncmp(arg, user, arglen)) {
+
+                        const char **opt;
+
+                        if (exact) {
+                            apr_array_clear(options);
+                        }
+
+                        opt = apr_array_push(options);
+                        opt[0] = apr_pstrcat(ds->pool,
+                                pair->optional == DEVICE_OPTIONAL ? "-" : "*",
+                                device_pescape_shell(ds->pool, pair->key), "=",
+                                device_pescape_shell(ds->pool, user),
+                                NULL);
+
+                        if (option) {
+                            if (none) {
+                                option[0] = NULL;
+                            }
+                            else {
+                                option[0] = possible[0];
+                            }
+                        }
+                    }
+
+                    if (exact) {
+                        /* exact matches short circuit */
+                        break;
+                    }
+
+                    none = NULL;
+
+                } while (1);
+
+            }
+
+            endgrent();
+
+            if (exact) {
+                /* exact matches short circuit */
+                break;
+            }
+
+        }
+
+    }
+
+
+    if (option && option[0]) {
+        if (options->nelts == 1) {
+            /* all ok */
+        }
+        else {
+            device_error_possibles(ds, pair->key, possibles);
+            return APR_INCOMPLETE;
+        }
+    }
+
+    return status;
+}
+
 static char *trim(char *buffer) {
 
     char *start = buffer, *end;
@@ -1849,6 +2076,9 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
                 status = device_parse_sql_delimited_identifier(ds, pair, value,
                         NULL);
                 break;
+            case DEVICE_PAIR_USER:
+                status = device_parse_user(ds, pair, value, options, NULL);
+                break;
             default:
                 status = APR_EINVAL;
             }
@@ -1939,6 +2169,9 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
         case DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER:
             status = device_parse_sql_delimited_identifier(ds, pair, val,
                     &val);
+            break;
+        case DEVICE_PAIR_USER:
+            status = device_parse_user(ds, pair, val, options, &val);
             break;
         }
 
@@ -2606,6 +2839,33 @@ int main(int argc, const char * const argv[])
             if (APR_SUCCESS != status) {
                 exit(2);
             }
+
+            break;
+        }
+        case DEVICE_USER: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_USER;
+            pair->key = optarg;
+            pair->optional = optional;
+            pair->u.groups = ds.user_groups;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            ds.user_groups = NULL;
+
+            break;
+        }
+        case DEVICE_USER_GROUP: {
+
+            const char **groups;
+
+            if (!ds.user_groups) {
+                ds.user_groups = apr_array_make(ds.pool, 2, sizeof(const char *));
+            }
+            groups = apr_array_push(ds.user_groups);
+            groups[0]= optarg;
 
             break;
         }

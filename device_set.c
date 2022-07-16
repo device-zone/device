@@ -70,8 +70,8 @@
 #define DEVICE_SQL ".sql"
 #define DEVICE_NONE ""
 
-#define DEVICE_ADD_MARKER "addme"
-#define DEVICE_REMOVE_MARKER "removeme"
+#define DEVICE_ADD_MARKER "added"
+#define DEVICE_REMOVE_MARKER "removed"
 
 typedef enum device_mode_e {
     DEVICE_SET,

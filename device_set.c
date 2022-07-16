@@ -66,9 +66,10 @@
 #define DEVICE_USER_GROUP 273
 #define DEVICE_USER 274
 
-#define DEVICE_TXT ".txt"
-#define DEVICE_SQL ".sql"
-#define DEVICE_NONE ""
+#define DEVICE_TXT_SUFFIX ".txt"
+#define DEVICE_SQL_SUFFIX ".txt"
+#define DEVICE_USER_SUFFIX ".txt"
+#define DEVICE_NONE_SUFFIX ""
 
 #define DEVICE_ADD_MARKER "added"
 #define DEVICE_REMOVE_MARKER "removed"
@@ -2686,7 +2687,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_PORT;
             pair->key = optarg;
-            pair->suffix = DEVICE_TXT;
+            pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
@@ -2699,7 +2700,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_UNPRIVILEGED_PORT;
             pair->key = optarg;
-            pair->suffix = DEVICE_TXT;
+            pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
@@ -2712,7 +2713,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_HOSTNAME;
             pair->key = optarg;
-            pair->suffix = DEVICE_TXT;
+            pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
@@ -2725,7 +2726,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_FQDN;
             pair->key = optarg;
-            pair->suffix = DEVICE_TXT;
+            pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
@@ -2738,7 +2739,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_SELECT;
             pair->key = optarg;
-            pair->suffix = DEVICE_TXT;
+            pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->sl.bases = ds.select_bases;
 
@@ -2766,7 +2767,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_BYTES;
             pair->key = optarg;
-            pair->suffix = DEVICE_TXT;
+            pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->b.min = bytes_min;
             pair->b.max = bytes_max;
@@ -2799,7 +2800,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_SYMLINK;
             pair->key = optarg;
-            pair->suffix = ds.symlink_suffix ? ds.symlink_suffix  : DEVICE_NONE;
+            pair->suffix = ds.symlink_suffix ? ds.symlink_suffix  : DEVICE_NONE_SUFFIX;
             pair->optional = optional;
             pair->s.bases = ds.symlink_bases;
 
@@ -2832,7 +2833,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_SQL_IDENTIFIER;
             pair->key = optarg;
-            pair->suffix = DEVICE_SQL;
+            pair->suffix = DEVICE_SQL_SUFFIX;
             pair->optional = optional;
             pair->q.min = sqlid_min;
             pair->q.max = sqlid_max;
@@ -2847,7 +2848,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER;
             pair->key = optarg;
-            pair->suffix = DEVICE_TXT;
+            pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->q.min = sqlid_min;
             pair->q.max = sqlid_max;
@@ -2880,6 +2881,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_USER;
             pair->key = optarg;
+            pair->suffix = DEVICE_USER_SUFFIX;
             pair->optional = optional;
             pair->u.groups = ds.user_groups;
 

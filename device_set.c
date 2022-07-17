@@ -2208,6 +2208,10 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
         file->val = val;
         file->index = pair->index;
 
+        if (APR_SUCCESS != status) {
+            return status;
+        }
+
         if (ds->key && !strcmp(ds->key, key)) {
 
             /* index must be unique */

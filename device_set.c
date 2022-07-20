@@ -72,6 +72,7 @@
 #define DEVICE_NONE_SUFFIX ""
 
 #define DEVICE_ADD_MARKER "added"
+#define DEVICE_SET_MARKER "updated"
 #define DEVICE_REMOVE_MARKER "removed"
 
 typedef enum device_mode_e {
@@ -1715,6 +1716,8 @@ done:
 
 static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 {
+    apr_file_t *out;
+
     char *pwd;
     const char *key = NULL, *keypath = NULL, *keyval = NULL;
     apr_status_t status = APR_SUCCESS;
@@ -1767,8 +1770,6 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
         /* try the directory create */
         if (ds->key) {
 
-            apr_file_t *out;
-
             apr_uuid_t uuid;
             char ustr[APR_UUID_FORMATTED_LENGTH + 1];
 
@@ -1794,18 +1795,18 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
             else if (APR_SUCCESS
                 != (status = apr_file_open(&out, DEVICE_ADD_MARKER, APR_FOPEN_CREATE | APR_FOPEN_WRITE,
                     APR_FPROT_OS_DEFAULT, ds->pool))) {
-                apr_file_printf(ds->err, "cannot create mark '%s': %pm\n", keyval,
+                apr_file_printf(ds->err, "cannot create add mark '%s': %pm\n", keyval,
                     &status);
                 return status;
             }
             else if (APR_SUCCESS != (status = apr_file_close(out))) {
-                apr_file_printf(ds->err, "cannot close mark '%s': %pm\n", keyval, &status);
+                apr_file_printf(ds->err, "cannot close add mark '%s': %pm\n", keyval, &status);
                 return status;
             }
             else if (APR_SUCCESS
                     != (status = apr_file_perms_set(DEVICE_ADD_MARKER,
                             APR_FPROT_OS_DEFAULT & ~DEVICE_FILE_UMASK))) {
-                apr_file_printf(ds->err, "cannot set permissions to mark '%s': %pm\n",
+                apr_file_printf(ds->err, "cannot set permissions to add mark '%s': %pm\n",
                         keyval, &status);
                 return status;
             }
@@ -1817,18 +1818,42 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
         }
 
     }
-    else if (ds->key) {
+    else {
 
-        /* re-index and implement ordering here */
+    	if (ds->key) {
+
+            /* re-index and implement ordering here */
 
 
-        /* change current working directory */
-        status = apr_filepath_set(ds->keypath, ds->pool);
+            /* change current working directory */
+            status = apr_filepath_set(ds->keypath, ds->pool);
 
-        if (APR_SUCCESS != status) {
-            apr_file_printf(ds->err, "cannot access '%s': %pm\n", ds->key, &status);
+            if (APR_SUCCESS != status) {
+                apr_file_printf(ds->err, "cannot access '%s': %pm\n", ds->key, &status);
+                return status;
+            }
+
+        }
+
+        /* try to mark updated file */
+        if (APR_SUCCESS
+                != (status = apr_file_open(&out, DEVICE_SET_MARKER,
+                        APR_FOPEN_CREATE | APR_FOPEN_WRITE,
+                        APR_FPROT_OS_DEFAULT, ds->pool))) {
+            apr_file_printf(ds->err, "cannot create set mark '%s': %pm\n", keyval,
+                    &status);
+            return status;
+        } else if (APR_SUCCESS != (status = apr_file_close(out))) {
+            apr_file_printf(ds->err, "cannot close set mark '%s': %pm\n", keyval,
+                    &status);
+            return status;
+        } else if (APR_SUCCESS != (status = apr_file_perms_set(DEVICE_SET_MARKER,
+                APR_FPROT_OS_DEFAULT & ~DEVICE_FILE_UMASK))) {
+            apr_file_printf(ds->err, "cannot set permissions to set mark '%s': %pm\n",
+                    keyval, &status);
             return status;
         }
+
     }
 
     /* try to write */
@@ -1920,6 +1945,13 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
                 apr_file_printf(ds->err, "cannot remove '%s': %pm\n", file->key, &status);
             }
 
+        }
+
+        /* remove the updated file here */
+        if (ds->mode != DEVICE_ADD && APR_SUCCESS !=
+        		(status = apr_file_remove(DEVICE_SET_MARKER, ds->pool))
+                && !APR_STATUS_IS_ENOENT(status)) {
+            apr_file_printf(ds->err, "cannot remove set mark: %pm\n", &status);
         }
 
         if (ds->key) {

@@ -65,10 +65,12 @@
 #define DEVICE_SQL_IDENTIFIER_MAX 272
 #define DEVICE_USER_GROUP 273
 #define DEVICE_USER 274
+#define DEVICE_DISTINGUISHED_NAME 275
 
 #define DEVICE_TXT_SUFFIX ".txt"
 #define DEVICE_SQL_SUFFIX ".txt"
 #define DEVICE_USER_SUFFIX ".txt"
+#define DEVICE_DISTINGUISHED_NAME_SUFFIX ".txt"
 #define DEVICE_NONE_SUFFIX ""
 
 #define DEVICE_ADD_MARKER "added"
@@ -127,7 +129,8 @@ typedef enum device_pair_e {
     DEVICE_PAIR_SYMLINK,
     DEVICE_PAIR_SQL_IDENTIFIER,
     DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER,
-    DEVICE_PAIR_USER
+    DEVICE_PAIR_USER,
+    DEVICE_PAIR_DISTINGUISHED_NAME
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -220,6 +223,7 @@ static const apr_getopt_option_t
     { "sql-id-maximum", DEVICE_SQL_IDENTIFIER_MAX, 1, "  --sql-id-maximum=chars\tMaximum length used by the next\n\t\t\t\tsql-id/sql-delimited-id option. Defaults to 63." },
     { "user-group", DEVICE_USER_GROUP, 1, "  --unix-group=name\t\tLimit usernames to members of the given group. May\n\t\t\t\tbe specified more than once." },
     { "user", DEVICE_USER, 1, "  --user=name\t\t\tParse a user that exists on the system." },
+    { "distinguished-name", DEVICE_DISTINGUISHED_NAME, 1, "  --distinguished-name=name\tParse an RFC4514 Distinguished Name." },
     { NULL }
 };
 
@@ -329,6 +333,7 @@ static const char *device_safename(apr_pool_t *pool, const char *name)
         case '/':
         case '\\':
             safe[i] = '_';
+            break;
         default:
             safe[i] = name[i];
         }
@@ -918,7 +923,6 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
     const char *none = NULL;
     apr_status_t status;
     apr_size_t arglen = arg ? strlen(arg) : 0;
-    apr_size_t poslen = 0;
 
     apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
 
@@ -998,7 +1002,6 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
 
                 possible = apr_array_push(possibles);
                 possible[0] = name;
-                poslen += strlen(possible[0]);
 
                 if (!strncmp(arg, name, arglen)) {
 
@@ -1503,6 +1506,384 @@ static apr_status_t device_parse_user(device_set_t *ds, device_pair_t *pair,
     return status;
 }
 
+enum dn_state {
+    DN_DN_START,
+    DN_RDN_START,
+    DN_ATAV_START,
+    DN_AT_START,
+    DN_DESCR,
+    DN_NUMERICOID_N_START,
+    DN_NUMERICOID_N,
+    DN_V_START,
+    DN_HEX_START,
+    DN_HEX_LEFT,
+    DN_HEX_RIGHT,
+    DN_STRING_START,
+    DN_STRING,
+    DN_STRING_ESC,
+    DN_STRING_HEX,
+};
+
+/**
+ * Distinguished name is a string described by RFC4514, containing a series
+ * of name value pairs.
+ */
+static apr_status_t device_parse_distinguished_name(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    apr_size_t arglen = arg ? strlen(arg) : 0;
+
+//    apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
+
+    const char *cp;
+
+    enum dn_state state = DN_DN_START;
+
+    char ch = 0, prev;
+
+    if (option) {
+        option[0] = NULL; /* until further notice */
+    }
+
+    if (pair->optional == DEVICE_REQUIRED && !arglen) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+
+    cp = arg;
+
+    while (*cp) {
+
+        prev = ch;
+        ch = *cp;
+
+        switch (state) {
+        case DN_DN_START:
+            if (ch == ',') {
+                apr_file_printf(ds->err, "'%s' has a stray '%c'\n", pair->key, ch);
+                return APR_EINVAL;
+            }
+
+            state = DN_RDN_START;
+            continue;
+        case DN_RDN_START:
+            if (ch == '+') {
+                apr_file_printf(ds->err, "'%s' has a stray '%c'\n", pair->key, ch);
+                return APR_EINVAL;
+            }
+
+            state = DN_ATAV_START;
+            continue;
+        case DN_ATAV_START:
+
+            state = DN_AT_START;
+            continue;
+        case DN_AT_START:
+            /* keystring = leadkeychar *keychar
+             * leadkeychar = ALPHA
+             * keychar = ALPHA / DIGIT / HYPHEN
+             * descr = keystring
+             * numericoid = number 1*( DOT number )
+             * oid = descr / numericoid
+             */
+            if (ch == '=') {
+                apr_file_printf(ds->err, "'%s' attribute type is empty\n", pair->key);
+                return APR_EINVAL;
+            }
+            else if (apr_isalpha(ch)) {
+                state = DN_DESCR;
+                continue;
+            }
+            else if (apr_isdigit(ch)) {
+                state = DN_NUMERICOID_N_START;
+                continue;
+            }
+
+            apr_file_printf(ds->err, "'%s' attribute type character %c is not alphanumeric\n", pair->key, ch);
+            return APR_EINVAL;
+
+        case DN_DESCR:
+            /* keystring = leadkeychar *keychar
+             * leadkeychar = ALPHA
+             * keychar = ALPHA / DIGIT / HYPHEN
+             * descr = keystring
+             */
+            if (ch == '=') {
+                state = DN_V_START;
+                cp++;
+                continue;
+            }
+            else if (ch != '-' && !apr_isalnum(ch)) {
+                apr_file_printf(ds->err, "'%s' attribute type character %c is not alphanumeric/hyphen\n", pair->key, ch);
+                return APR_EINVAL;
+            }
+
+            break;
+        case DN_NUMERICOID_N_START:
+            /* numericoid = number 1*( DOT number )
+             */
+            if (!apr_isdigit(ch)) {
+                apr_file_printf(ds->err, "'%s' attribute type character %c is not numeric\n", pair->key, ch);
+                return APR_EINVAL;
+            }
+
+            state = DN_NUMERICOID_N;
+            cp++;
+            continue;
+        case DN_NUMERICOID_N:
+            /* numericoid = number 1*( DOT number )
+             */
+            if (ch == '=') {
+                state = DN_V_START;
+                cp++;
+                continue;
+            }
+            if (ch == '.') {
+                state = DN_NUMERICOID_N_START;
+                cp++;
+                continue;
+            }
+            if (!apr_isdigit(ch)) {
+                apr_file_printf(ds->err, "'%s' attribute type character %c is not numeric\n", pair->key, ch);
+                return APR_EINVAL;
+            }
+
+            break;
+        case DN_V_START:
+            /* attributeValue = string / hexstring
+             * hexstring = SHARP 1*hexpair
+             * hexpair = HEX HEX
+             */
+            if (ch == ',' || ch == '+') {
+                state = DN_RDN_START;
+                cp++;
+                continue;
+            }
+            else if (ch == '#') {
+                state = DN_HEX_START;
+                cp++;
+                continue;
+            }
+
+            state = DN_STRING_START;
+            continue;
+
+        case DN_HEX_START:
+            /* attributeValue = string / hexstring
+             * hexstring = SHARP 1*hexpair
+             * hexpair = HEX HEX
+             */
+            if (!apr_isxdigit(ch)) {
+                apr_file_printf(ds->err, "'%s' attribute type character %c is not a hex digit\n", pair->key, ch);
+                return APR_EINVAL;
+            }
+
+            state = DN_HEX_RIGHT;
+            cp++;
+            continue;
+
+        case DN_HEX_LEFT:
+            /* attributeValue = string / hexstring
+             * hexstring = SHARP 1*hexpair
+             * hexpair = HEX HEX
+             */
+            if (ch == ',' || ch == '+') {
+                state = DN_RDN_START;
+                cp++;
+                continue;
+            }
+            else if (!apr_isxdigit(ch)) {
+                apr_file_printf(ds->err, "'%s' attribute type character %c is not a hex digit\n", pair->key, ch);
+                return APR_EINVAL;
+            }
+
+            state = DN_HEX_RIGHT;
+            cp++;
+            continue;
+
+        case DN_HEX_RIGHT:
+            /* attributeValue = string / hexstring
+             * hexstring = SHARP 1*hexpair
+             * hexpair = HEX HEX
+             */
+            if (!apr_isxdigit(ch)) {
+                apr_file_printf(ds->err, "'%s' attribute type character %c is not a hex digit\n", pair->key, ch);
+                return APR_EINVAL;
+            }
+
+            state = DN_HEX_LEFT;
+            cp++;
+            continue;
+
+        case DN_STRING_START:
+            /* ; The following characters are to be escaped when they appear
+             * ; in the value to be encoded: ESC, one of <escaped>, leading
+             * ; SHARP or SPACE, trailing SPACE, and NULL.
+             * string =   [ ( leadchar / pair ) [ *( stringchar / pair )
+             *            ( trailchar / pair ) ] ]
+             *
+             * leadchar = LUTF1 / UTFMB
+             * LUTF1 = %x01-1F / %x21 / %x24-2A / %x2D-3A /
+             *         %x3D / %x3F-5B / %x5D-7F
+             *
+             * trailchar  = TUTF1 / UTFMB
+             * TUTF1 = %x01-1F / %x21 / %x23-2A / %x2D-3A /
+             *         %x3D / %x3F-5B / %x5D-7F
+             *
+             * stringchar = SUTF1 / UTFMB
+             * SUTF1 = %x01-21 / %x23-2A / %x2D-3A /
+             *         %x3D / %x3F-5B / %x5D-7F
+             *
+             * pair = ESC ( ESC / special / hexpair )
+             * special = escaped / SPACE / SHARP / EQUALS
+             * escaped = DQUOTE / PLUS / COMMA / SEMI / LANGLE / RANGLE
+             */
+
+            /* leadchar: has no [space]"#,+;<>\
+             * stringchar: has no ",+;<>\
+             * trailchar: has no [space]",+;<>\
+             */
+
+            /* %x20 */
+            if (ch == ' ') {
+                apr_file_printf(ds->err, "'%s' value cannot start with a space\n", pair->key);
+                return APR_EINVAL;
+            }
+
+            state = DN_STRING;
+            continue;
+
+        case DN_STRING:
+
+               /* stringchar: has no ",+;<>\ */
+
+            if (ch == '"' || ch == ';' || ch == '<' || ch == '>') {
+                apr_file_printf(ds->err, "'%s' value character %c is not escaped\n", pair->key, ch);
+                return APR_EINVAL;
+            }
+
+            /* %x2B %x2C */
+            else if (ch == ',' || ch == '+') {
+
+                if (prev == ' ') {
+                    apr_file_printf(ds->err, "'%s' value cannot end with a space\n", pair->key);
+                    return APR_EINVAL;
+                }
+
+                state = DN_RDN_START;
+                cp++;
+                continue;
+            }
+
+            else if (ch == '\\') {
+                state = DN_STRING_ESC;
+                cp++;
+                continue;
+            }
+
+            break;
+
+        case DN_STRING_ESC:
+            /*
+             * pair = ESC ( ESC / special / hexpair )
+             * special = escaped / SPACE / SHARP / EQUALS
+             * escaped = DQUOTE / PLUS / COMMA / SEMI / LANGLE / RANGLE
+             */
+
+            switch (ch) {
+            case '\\':
+            case '"':
+            case '+':
+            case ',':
+            case ';':
+            case '<':
+            case '>':
+            case ' ':
+            case '#':
+            case '=':
+                /* ESC / special */
+
+                state = DN_STRING;
+                cp++;
+                ch = 0; /* previous character is always fine */
+                continue;
+
+            default:
+
+                if (apr_isxdigit(ch)) {
+                    state = DN_STRING_HEX;
+                    cp++;
+                    continue;
+                }
+            }
+
+            apr_file_printf(ds->err, "'%s' value character %c is not a valid escape character (\\\"+,;<> #=[hex])\n", pair->key, ch);
+            return APR_EINVAL;
+
+        case DN_STRING_HEX:
+
+            if (apr_isxdigit(ch)) {
+                state = DN_STRING;
+                cp++;
+                continue;
+            }
+
+            apr_file_printf(ds->err, "'%s' value character %c is not a valid escape hex character\n", pair->key, ch);
+            return APR_EINVAL;
+        }
+
+        cp++;
+    }
+
+    switch (state) {
+    case DN_V_START:
+    case DN_HEX_LEFT:
+    case DN_STRING:
+    case DN_STRING_START:
+        /* if we're parsing the last string, it's valid to be done */
+
+        if (ch == ' ') {
+            apr_file_printf(ds->err, "'%s' value cannot end with a space\n", pair->key);
+            return APR_EINVAL;
+        }
+
+        return APR_SUCCESS;
+
+    case DN_HEX_START:
+    case DN_HEX_RIGHT:
+    case DN_STRING_HEX:
+
+        apr_file_printf(ds->err, "'%s' ends too early (expecting hex digit)\n", pair->key);
+        return APR_EINVAL;
+
+    case DN_RDN_START:
+
+        apr_file_printf(ds->err, "'%s' ends too early (expecting relative distinguished name)\n", pair->key);
+        return APR_EINVAL;
+
+    case DN_STRING_ESC:
+
+        apr_file_printf(ds->err, "'%s' ends too early (expecting escape)\n", pair->key);
+        return APR_EINVAL;
+
+    case DN_DESCR:
+    case DN_NUMERICOID_N:
+
+        apr_file_printf(ds->err, "'%s' ends too early (attribute needs value)\n", pair->key);
+        return APR_EINVAL;
+
+    case DN_DN_START:
+    case DN_ATAV_START:
+    case DN_AT_START:
+    case DN_NUMERICOID_N_START:
+
+        apr_file_printf(ds->err, "'%s' ends too early %d\n", pair->key, state);
+        return APR_EINVAL;
+
+    }
+
+}
+
 static char *trim(char *buffer) {
 
     char *start = buffer, *end;
@@ -1820,7 +2201,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
     }
     else {
 
-    	if (ds->key) {
+        if (ds->key) {
 
             /* re-index and implement ordering here */
 
@@ -1949,7 +2330,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
         /* remove the updated file here */
         if (ds->mode != DEVICE_ADD && APR_SUCCESS !=
-        		(status = apr_file_remove(DEVICE_SET_MARKER, ds->pool))
+                (status = apr_file_remove(DEVICE_SET_MARKER, ds->pool))
                 && !APR_STATUS_IS_ENOENT(status)) {
             apr_file_printf(ds->err, "cannot remove set mark: %pm\n", &status);
         }
@@ -2138,6 +2519,9 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             case DEVICE_PAIR_USER:
                 status = device_parse_user(ds, pair, value, options, NULL);
                 break;
+            case DEVICE_PAIR_DISTINGUISHED_NAME:
+                status = device_parse_distinguished_name(ds, pair, value, options, NULL);
+                break;
             default:
                 status = APR_EINVAL;
             }
@@ -2231,6 +2615,9 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             break;
         case DEVICE_PAIR_USER:
             status = device_parse_user(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_DISTINGUISHED_NAME:
+            status = device_parse_distinguished_name(ds, pair, val, options, &val);
             break;
         }
 
@@ -2939,6 +3326,19 @@ int main(int argc, const char * const argv[])
 
             break;
         }
+        case DEVICE_DISTINGUISHED_NAME: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_DISTINGUISHED_NAME;
+            pair->key = optarg;
+            pair->suffix = DEVICE_DISTINGUISHED_NAME_SUFFIX;
+            pair->optional = optional;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
         }
 
         if (complete) {
@@ -2950,30 +3350,33 @@ int main(int argc, const char * const argv[])
         return help(ds.err, argv[0], NULL, EXIT_FAILURE, cmdline_opts);
     }
 
-    index = apr_hash_get(ds.pairs, ds.key, APR_HASH_KEY_STRING);
-    if (index) {
+    if (ds.key) {
 
-        /* index parameter always required */
-        index->optional = DEVICE_REQUIRED;
+        index = apr_hash_get(ds.pairs, ds.key, APR_HASH_KEY_STRING);
+        if (index) {
 
-        /* mark the index */
-        index->index = DEVICE_INDEX;
+            /* index parameter always required */
+            index->optional = DEVICE_REQUIRED;
 
-    }
-    else {
-        if (ds.mode == DEVICE_ADD) {
-            return help(ds.err, argv[0], "The --add parameter was not found on the command line.",
-                    EXIT_FAILURE, cmdline_opts);
+            /* mark the index */
+            index->index = DEVICE_INDEX;
+
         }
+        else {
+            if (ds.mode == DEVICE_ADD) {
+                return help(ds.err, argv[0], "The --add parameter was not found on the command line.",
+                        EXIT_FAILURE, cmdline_opts);
+            }
 
-        if (ds.mode == DEVICE_REMOVE) {
-            return help(ds.err, argv[0], "The --remove parameter was not found on the command line.",
-                    EXIT_FAILURE, cmdline_opts);
-        }
+            if (ds.mode == DEVICE_REMOVE) {
+                return help(ds.err, argv[0], "The --remove parameter was not found on the command line.",
+                        EXIT_FAILURE, cmdline_opts);
+            }
 
-        if (ds.mode == DEVICE_SET && ds.key) {
-            return help(ds.err, argv[0], "The --set parameter was not found on the command line.",
-                    EXIT_FAILURE, cmdline_opts);
+            if (ds.mode == DEVICE_SET) {
+                return help(ds.err, argv[0], "The --set parameter was not found on the command line.",
+                        EXIT_FAILURE, cmdline_opts);
+            }
         }
     }
 

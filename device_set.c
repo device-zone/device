@@ -47,26 +47,28 @@
 #include <pwd.h>
 #endif
 
-#define DEVICE_PORT 257
-#define DEVICE_UNPRIVILEGED_PORT 258
-#define DEVICE_HOSTNAME 259
-#define DEVICE_FQDN 260
-#define DEVICE_SELECT 261
-#define DEVICE_SELECT_BASE 262
-#define DEVICE_BYTES 263
-#define DEVICE_BYTES_MIN 264
-#define DEVICE_BYTES_MAX 265
-#define DEVICE_SYMLINK 266
-#define DEVICE_SYMLINK_BASE 267
-#define DEVICE_SYMLINK_SUFFIX 268
-#define DEVICE_SQL_IDENTIFIER 269
-#define DEVICE_SQL_DELIMITED_IDENTIFIER 270
-#define DEVICE_SQL_IDENTIFIER_MIN 271
-#define DEVICE_SQL_IDENTIFIER_MAX 272
-#define DEVICE_USER_GROUP 273
-#define DEVICE_USER 274
-#define DEVICE_DISTINGUISHED_NAME 275
+#define DEVICE_INDEX 257
+#define DEVICE_PORT 258
+#define DEVICE_UNPRIVILEGED_PORT 259
+#define DEVICE_HOSTNAME 260
+#define DEVICE_FQDN 261
+#define DEVICE_SELECT 262
+#define DEVICE_SELECT_BASE 263
+#define DEVICE_BYTES 264
+#define DEVICE_BYTES_MIN 265
+#define DEVICE_BYTES_MAX 266
+#define DEVICE_SYMLINK 267
+#define DEVICE_SYMLINK_BASE 268
+#define DEVICE_SYMLINK_SUFFIX 269
+#define DEVICE_SQL_IDENTIFIER 270
+#define DEVICE_SQL_DELIMITED_IDENTIFIER 271
+#define DEVICE_SQL_IDENTIFIER_MIN 272
+#define DEVICE_SQL_IDENTIFIER_MAX 273
+#define DEVICE_USER_GROUP 274
+#define DEVICE_USER 275
+#define DEVICE_DISTINGUISHED_NAME 276
 
+#define DEVICE_INDEX_SUFFIX ""
 #define DEVICE_TXT_SUFFIX ".txt"
 #define DEVICE_SQL_SUFFIX ".txt"
 #define DEVICE_USER_SUFFIX ".txt"
@@ -120,6 +122,7 @@ typedef struct device_set_t {
 #define DEVICE_FILE_UMASK (0x0113)
 
 typedef enum device_pair_e {
+    DEVICE_PAIR_INDEX,
     DEVICE_PAIR_PORT,
     DEVICE_PAIR_UNPRIVILEGED_PORT,
     DEVICE_PAIR_HOSTNAME,
@@ -140,7 +143,7 @@ typedef enum device_optional_e {
 
 typedef enum device_index_e {
     DEVICE_NORMAL,
-    DEVICE_INDEX
+    DEVICE_INDEXED
 } device_index_e;
 
 typedef struct device_pair_selects_t {
@@ -205,6 +208,7 @@ static const apr_getopt_option_t
     { "remove", 'd', 1, "  -d, --remove=name\t\tRemove a set of options, named by the key\n\t\t\t\tspecified. The removal takes place immediately." },
     { "mark", 'm', 1, "  -m, --mark=name\t\tMark a set of options for removal, named by the\n\t\t\t\tkey specified. The actual removal is expected\n\t\t\t\tto be done by the script that processes this\n\t\t\t\toption. A file called '" DEVICE_REMOVE_MARKER "' will be created\n\t\t\t\tin the directory to indicate the directory\n\t\t\t\tshould be processed for removal." },
     { "set", 's', 1, "  -s, --set\t\t\tSet an option among a set of options, named by\n\t\t\t\tthe key specified. A file called '" DEVICE_SET_MARKER "' is\n\t\t\t\tcreated to indicate that settings should be\n\t\t\t\tprocessed for update." },
+    { "index", DEVICE_INDEX, 1, "  --index=name\t\t\tSet the index of this option within a set of\n\t\t\t\toptions. If set to a positive integer starting\n\t\t\t\tfrom zero, this option will be inserted at the\n\t\t\t\tgiven index and higher options moved one up to\n\t\t\t\tfit. If unset, or if larger than the index of\n\t\t\t\tthe last option, this option will be set as the\n\t\t\t\tlast option and others moved down to fit. If\n\t\t\t\tnegative, the option will be inserted at the\n\t\t\t\tend counting backwards." },
     { "port", DEVICE_PORT, 1, "  --port=name\t\t\tParse a port. Ports are integers in the range\n\t\t\t\t0 to 65535." },
     { "unprivileged-port", DEVICE_UNPRIVILEGED_PORT, 1, "  --unprivileged-port=name\tParse an unprivileged port. Unprivileged ports\n\t\t\t\tare integers in the range 1025 to 49151." },
     { "hostname", DEVICE_HOSTNAME, 1, "  --hostname=name\t\tParse a hostname. Hostnames consist of the\n\t\t\t\tcharacters a-z, 0-9, or a hyphen. Hostname\n\t\t\t\tcannot start with a hyphen." },
@@ -342,6 +346,33 @@ static const char *device_safename(apr_pool_t *pool, const char *name)
     safe[i] = 0;
 
     return safe;
+}
+
+/*
+ * Index is an integer between APR_INT64_MIN and APR_INT64_MAX inclusive.
+ */
+static apr_status_t device_parse_index(device_set_t *ds, device_pair_t *pair,
+        const char *arg, const char **option)
+{
+    char *end;
+
+    if (!arg || !arg[0]) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    apr_int64_t index = apr_strtoi64(arg, &end, 10);
+    if (end[0] || errno == ERANGE) {
+        apr_file_printf(ds->err, "argument '%s': '%s' is not a valid index.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1),
+                apr_pescape_echo(ds->pool, arg, 1));
+        return APR_EINVAL;
+    }
+    if (option) {
+        *option = apr_psprintf(ds->pool, "%" APR_INT64_T_FMT, index);
+    }
+    return APR_SUCCESS;
 }
 
 /*
@@ -2300,7 +2331,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
             }
         }
 
-        if (file->index == DEVICE_INDEX) {
+        if (file->index == DEVICE_INDEXED) {
             keyval = file->val;
         }
 
@@ -2488,6 +2519,9 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             int i;
 
             switch (pair->type) {
+            case DEVICE_PAIR_INDEX:
+                status = device_parse_index(ds, pair, value, NULL);
+                break;
             case DEVICE_PAIR_PORT:
                 status = device_parse_port(ds, pair, value);
                 break;
@@ -2584,6 +2618,9 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
         file->type = APR_REG;
 
         switch (pair->type) {
+        case DEVICE_PAIR_INDEX:
+            status = device_parse_index(ds, pair, val, &val);
+            break;
         case DEVICE_PAIR_PORT:
             status = device_parse_port(ds, pair, val);
             break;
@@ -3104,6 +3141,19 @@ int main(int argc, const char * const argv[])
             help(ds.out, argv[0], NULL, 0, cmdline_opts);
             return 0;
         }
+        case DEVICE_INDEX: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_INDEX;
+            pair->key = optarg;
+            pair->suffix = DEVICE_INDEX_SUFFIX;
+            pair->optional = optional;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
         case DEVICE_PORT: {
 
             device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
@@ -3359,7 +3409,7 @@ int main(int argc, const char * const argv[])
             index->optional = DEVICE_REQUIRED;
 
             /* mark the index */
-            index->index = DEVICE_INDEX;
+            index->index = DEVICE_INDEXED;
 
         }
         else {

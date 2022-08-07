@@ -1885,6 +1885,10 @@ static apr_status_t device_parse_distinguished_name(device_set_t *ds, device_pai
             return APR_EINVAL;
         }
 
+        if (option) {
+            option[0] = arg;
+        }
+
         return APR_SUCCESS;
 
     case DN_HEX_START:

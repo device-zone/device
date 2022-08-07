@@ -146,6 +146,11 @@ typedef enum device_index_e {
     DEVICE_INDEXED
 } device_index_e;
 
+typedef enum device_unique_e {
+    DEVICE_REPEATED,
+    DEVICE_UNIQUE
+} device_unique_e;
+
 typedef enum device_set_e {
     DEVICE_SET_UNSET,
     DEVICE_SET_SET,
@@ -179,6 +184,7 @@ typedef struct device_pair_t {
     const char *suffix;
     device_pair_e type;
     device_optional_e optional;
+    device_unique_e unique;
     device_index_e index;
     device_set_e set;
     union {
@@ -196,6 +202,7 @@ typedef struct device_file_t {
     const char *dest;
     const char *backup;
     const char *val;
+    apr_int64_t order;
     device_index_e index;
     apr_filetype_e type;
 } device_file_t;
@@ -355,13 +362,52 @@ static const char *device_safename(apr_pool_t *pool, const char *name)
     return safe;
 }
 
+static char *trim(char *buffer) {
+
+    char *start = buffer, *end;
+
+    while(*buffer && apr_isspace(*buffer)) {
+        start = buffer++;
+    }
+
+    end = start;
+
+    while(*buffer) {
+        if (!apr_isspace(*buffer)) {
+            end = ++buffer;
+        }
+        else {
+            buffer++;
+        }
+    }
+
+    *end = 0;
+
+    return start;
+}
+
+static int files_desc(const void *a, const void *b)
+{
+    const device_file_t *fa = a, *fb = b;
+
+    return fb->order - fa->order;
+}
+
 /*
  * Index is an integer between APR_INT64_MIN and APR_INT64_MAX inclusive.
  */
 static apr_status_t device_parse_index(device_set_t *ds, device_pair_t *pair,
-        const char *arg, const char **option)
+        const char *arg, const char **option, apr_array_header_t *files)
 {
     char *end;
+
+    apr_dir_t *thedir;
+    apr_finfo_t dirent;
+
+    apr_array_header_t *tfiles = apr_array_make(ds->pool, 16, sizeof(device_file_t));
+
+    apr_status_t status;
+    int found = 0;
 
     if (!arg || !arg[0]) {
         apr_file_printf(ds->err, "argument '%s': is empty.\n",
@@ -369,15 +415,218 @@ static apr_status_t device_parse_index(device_set_t *ds, device_pair_t *pair,
         return APR_INCOMPLETE;
     }
 
-    apr_int64_t index = apr_strtoi64(arg, &end, 10);
+    apr_int64_t ind = apr_strtoi64(arg, &end, 10);
     if (end[0] || errno == ERANGE) {
         apr_file_printf(ds->err, "argument '%s': '%s' is not a valid index.\n",
                 apr_pescape_echo(ds->pool, pair->key, 1),
                 apr_pescape_echo(ds->pool, arg, 1));
         return APR_EINVAL;
     }
+
+    if (!files) {
+        return APR_SUCCESS;
+    }
+
+    /* make space for the index when needed */
+
+    /* scan the directories to find a match */
+    if ((status = apr_dir_open(&thedir, ".", ds->pool)) != APR_SUCCESS) {
+        /* could not open directory, fail */
+        apr_file_printf(ds->err, "could not open current directory: %pm\n", &status);
+        return status;
+    }
+
+    do {
+
+        status = apr_dir_read(&dirent,
+                APR_FINFO_TYPE | APR_FINFO_NAME | APR_FINFO_WPROT, thedir);
+        if (APR_STATUS_IS_INCOMPLETE(status)) {
+            continue; /* ignore un-stat()able files */
+        } else if (status != APR_SUCCESS) {
+            break;
+        }
+
+        /* hidden files are ignored */
+        if (dirent.name[0] == '.') {
+            continue;
+        }
+
+        switch (dirent.filetype) {
+        case APR_DIR: {
+
+            apr_pool_t *pool;
+            char *val;
+            apr_file_t *in;
+            const char *indexname;
+            char *indexpath, *path, *linkpath;
+            apr_off_t end = 0, start = 0;
+
+            apr_pool_create(&pool, ds->pool);
+
+            indexname = apr_pstrcat(pool, pair->key, pair->suffix, NULL);
+            if (APR_SUCCESS
+                    != (status = apr_filepath_merge(&indexpath, dirent.name,
+                            indexname, APR_FILEPATH_NOTABSOLUTE, pool))) {
+                apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                        &status);
+            }
+
+            /* open the index */
+            else if (APR_SUCCESS
+                    != (status = apr_file_open(&in, indexpath, APR_FOPEN_READ,
+                            APR_FPROT_OS_DEFAULT, pool))) {
+                apr_file_printf(ds->err, "cannot open option set '%s': %pm\n", pair->key,
+                        &status);
+            }
+
+            /* how long is the key? */
+            else if (APR_SUCCESS
+                    != (status = apr_file_seek(in, APR_END, &end))) {
+                apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                        &status);
+            }
+
+            /* back to the beginning */
+            else if (APR_SUCCESS
+                    != (status = apr_file_seek(in, APR_SET, &start))) {
+                apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                        &status);
+            }
+
+            else {
+                int size = end + 1;
+                val = apr_palloc(pool, size);
+
+                status = apr_file_gets(val, size, in);
+
+                if (APR_EOF == status) {
+                    status = APR_SUCCESS;
+                }
+                if (APR_SUCCESS == status) {
+                    /* short circuit, all good */
+                    val = trim(val);
+                }
+                else {
+                    apr_file_printf(ds->err, "cannot read option set '%s': %pm\n", pair->key,
+                            &status);
+                }
+            }
+
+            if (status != APR_SUCCESS) {
+                apr_pool_destroy(pool);
+                break;
+            }
+            else {
+
+                char *end;
+
+                /* parse index, is it the largest so far? */
+
+                apr_int64_t order = apr_strtoi64(val, &end, 10);
+                if (end[0] || errno == ERANGE) {
+                    apr_file_printf(ds->err, "argument '%s': '%s' is not a valid index, ignoring.\n",
+                            apr_pescape_echo(ds->pool, pair->key, 1),
+                            apr_pescape_echo(ds->pool, val, 1));
+                    /* ignore and loop round */
+                }
+                else if (order == APR_INT64_MAX) {
+                    apr_file_printf(ds->err, "argument '%s': existing index '%s' is too big.\n",
+                            apr_pescape_echo(ds->pool, pair->key, 1),
+                            apr_pescape_echo(ds->pool, val, 1));
+                    return APR_EGENERAL;
+                }
+
+                /* nothing counts until we find a match */
+                if (order == ind) {
+                    found = 1;
+                }
+
+                if (order >= ind) {
+
+                    device_file_t *file, *link;
+
+                    order++;
+
+                    val = apr_psprintf(ds->pool, "%" APR_INT64_T_FMT, order);
+
+                    if (APR_SUCCESS
+                            != (status = apr_filepath_merge(&path, "..",
+                                    indexpath, APR_FILEPATH_NOTABSOLUTE, pool))) {
+                        apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                                &status);
+                        return status;
+                    }
+
+                    if (APR_SUCCESS
+                            != (status = apr_filepath_merge(&linkpath, "..",
+                                    val, APR_FILEPATH_NOTABSOLUTE, pool))) {
+                        apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                                &status);
+                        return status;
+                    }
+
+                    /* add index */
+                    file = apr_array_push(tfiles);
+                    file->type = APR_REG;
+                    file->order = order;
+
+                    file->dest = path;
+                    file->template = apr_pstrcat(ds->pool, file->dest, ".XXXXXX", NULL);
+                    file->key = pair->key;
+                    file->val = val;
+                    file->index = pair->index;
+
+                    /* add symlink */
+                    link = apr_array_push(tfiles);
+                    link->type = APR_LNK;
+                    link->order = order;
+
+                    link->dest = linkpath;
+                    link->key = pair->key;
+                    link->val = apr_pstrdup(ds->pool, dirent.name);
+                    link->index = DEVICE_NORMAL;
+
+                }
+            }
+
+            apr_pool_destroy(pool);
+
+            break;
+        }
+        default:
+            break;
+        }
+
+    } while (1);
+
+    apr_dir_close(thedir);
+
+    if (APR_SUCCESS == status) {
+        /* short circuit, all good */
+    }
+    else if (APR_STATUS_IS_ENOENT(status)) {
+        status = APR_SUCCESS;
+    }
+    else {
+        apr_file_printf(ds->err, "cannot read indexes: %pm\n",
+                &status);
+        return status;
+    }
+
+    if (found) {
+
+        /* sort tfiles large to small so reindex doesn't stomp on files */
+        qsort(tfiles->elts, tfiles->nelts, tfiles->elt_size, files_desc);
+
+        apr_array_cat(files, tfiles);
+        tfiles = files;
+
+        /* suppress the unique check */
+        pair->unique = DEVICE_REPEATED;
+    }
+
     if (option) {
-        *option = apr_psprintf(ds->pool, "%" APR_INT64_T_FMT, index);
+        *option = apr_psprintf(ds->pool, "%" APR_INT64_T_FMT, ind);
     }
     return APR_SUCCESS;
 }
@@ -1926,30 +2175,6 @@ static apr_status_t device_parse_distinguished_name(device_set_t *ds, device_pai
 
 }
 
-static char *trim(char *buffer) {
-
-    char *start = buffer, *end;
-
-    while(*buffer && apr_isspace(*buffer)) {
-        start = buffer++;
-    }
-
-    end = start;
-
-    while(*buffer) {
-        if (!apr_isspace(*buffer)) {
-            end = ++buffer;
-        }
-        else {
-            buffer++;
-        }
-    }
-
-    *end = 0;
-
-    return start;
-}
-
 static apr_status_t device_get(device_set_t *ds, const char *arg,
         apr_array_header_t *options, const char **option, const char **path,
         int *exact)
@@ -2184,19 +2409,19 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
             else if (APR_SUCCESS
                 != (status = apr_file_open(&out, DEVICE_ADD_MARKER, APR_FOPEN_CREATE | APR_FOPEN_WRITE,
                     APR_FPROT_OS_DEFAULT, ds->pool))) {
-                apr_file_printf(ds->err, "cannot create add mark '%s': %pm\n", keyval,
+                apr_file_printf(ds->err, "cannot create add mark '%s': %pm\n", ds->key,
                     &status);
                 return status;
             }
             else if (APR_SUCCESS != (status = apr_file_close(out))) {
-                apr_file_printf(ds->err, "cannot close add mark '%s': %pm\n", keyval, &status);
+                apr_file_printf(ds->err, "cannot close add mark '%s': %pm\n", ds->key, &status);
                 return status;
             }
             else if (APR_SUCCESS
                     != (status = apr_file_perms_set(DEVICE_ADD_MARKER,
                             APR_FPROT_OS_DEFAULT & ~DEVICE_FILE_UMASK))) {
                 apr_file_printf(ds->err, "cannot set permissions to add mark '%s': %pm\n",
-                        keyval, &status);
+                        ds->key, &status);
                 return status;
             }
 
@@ -2229,17 +2454,17 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
                 != (status = apr_file_open(&out, DEVICE_SET_MARKER,
                         APR_FOPEN_CREATE | APR_FOPEN_WRITE,
                         APR_FPROT_OS_DEFAULT, ds->pool))) {
-            apr_file_printf(ds->err, "cannot create set mark '%s': %pm\n", keyval,
+            apr_file_printf(ds->err, "cannot create set mark '%s': %pm\n", ds->key,
                     &status);
             return status;
         } else if (APR_SUCCESS != (status = apr_file_close(out))) {
-            apr_file_printf(ds->err, "cannot close set mark '%s': %pm\n", keyval,
+            apr_file_printf(ds->err, "cannot close set mark '%s': %pm\n", ds->key,
                     &status);
             return status;
         } else if (APR_SUCCESS != (status = apr_file_perms_set(DEVICE_SET_MARKER,
                 APR_FPROT_OS_DEFAULT & ~DEVICE_FILE_UMASK))) {
             apr_file_printf(ds->err, "cannot set permissions to set mark '%s': %pm\n",
-                    keyval, &status);
+                    ds->key, &status);
             return status;
         }
 
@@ -2336,8 +2561,13 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
         }
 
-        /* remove the updated file here */
-        if (ds->mode != DEVICE_ADD && APR_SUCCESS !=
+        /* remove the added/updated markers here */
+        if (ds->mode == DEVICE_ADD && APR_SUCCESS !=
+                (status = apr_file_remove(DEVICE_ADD_MARKER, ds->pool))
+                && !APR_STATUS_IS_ENOENT(status)) {
+            apr_file_printf(ds->err, "cannot remove add mark: %pm\n", &status);
+        }
+        if (ds->mode == DEVICE_SET && APR_SUCCESS !=
                 (status = apr_file_remove(DEVICE_SET_MARKER, ds->pool))
                 && !APR_STATUS_IS_ENOENT(status)) {
             apr_file_printf(ds->err, "cannot remove set mark: %pm\n", &status);
@@ -2385,6 +2615,9 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
                 apr_file_printf(ds->err, "cannot remove '%s': %pm\n", file->key, &status);
             }
 
+            if (file->index == DEVICE_INDEXED) {
+
+            }
         }
 
         /* revert to present working directory */
@@ -2400,6 +2633,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
         }
 
         else if (keypath && keyval) {
+            apr_file_remove(keyval, ds->pool);
             symlink(keypath, keyval);
         }
 
@@ -2497,7 +2731,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
 
             switch (pair->type) {
             case DEVICE_PAIR_INDEX:
-                status = device_parse_index(ds, pair, value, NULL);
+                status = device_parse_index(ds, pair, value, NULL, NULL);
                 break;
             case DEVICE_PAIR_PORT:
                 status = device_parse_port(ds, pair, value);
@@ -2770,12 +3004,11 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
 
         apr_array_header_t *options = apr_array_make(ds->pool, (10), sizeof(char *));
 
-        file = apr_array_push(files);
-        file->type = APR_REG;
+        apr_filetype_e type = APR_REG;
 
         switch (pair->type) {
         case DEVICE_PAIR_INDEX:
-            status = device_parse_index(ds, pair, val, &val);
+            status = device_parse_index(ds, pair, val, &val, files);
             break;
         case DEVICE_PAIR_PORT:
             status = device_parse_port(ds, pair, val);
@@ -2797,7 +3030,7 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             break;
         case DEVICE_PAIR_SYMLINK:
             status = device_parse_symlink(ds, pair, val, options, &val);
-            file->type = APR_LNK;
+            type = APR_LNK;
             break;
         case DEVICE_PAIR_SQL_IDENTIFIER:
             status = device_parse_sql_identifier(ds, pair, val, &val);
@@ -2814,6 +3047,9 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             break;
         }
 
+        file = apr_array_push(files);
+        file->type = type;
+
         file->dest = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
         file->template = apr_pstrcat(ds->pool, file->dest, ".XXXXXX", NULL);
         file->key = key;
@@ -2826,7 +3062,7 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
 
         pair->set = DEVICE_SET_SET;
 
-        if (ds->key && !strcmp(ds->key, key)) {
+        if (pair->unique == DEVICE_UNIQUE) {
 
             /* index must be unique */
 
@@ -3600,6 +3836,9 @@ int main(int argc, const char * const argv[])
 
             /* mark the index */
             index->index = DEVICE_INDEXED;
+
+            /* index must be unique until further notice */
+            index->unique = DEVICE_UNIQUE;
 
         }
         else {

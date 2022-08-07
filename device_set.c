@@ -68,7 +68,7 @@
 #define DEVICE_USER 275
 #define DEVICE_DISTINGUISHED_NAME 276
 
-#define DEVICE_INDEX_SUFFIX ""
+#define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
 #define DEVICE_SQL_SUFFIX ".txt"
 #define DEVICE_USER_SUFFIX ".txt"

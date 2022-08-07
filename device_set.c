@@ -137,24 +137,24 @@ typedef enum device_pair_e {
 } device_pair_e;
 
 typedef enum device_optional_e {
-    DEVICE_OPTIONAL,
-    DEVICE_REQUIRED
+    DEVICE_IS_OPTIONAL,
+    DEVICE_IS_REQUIRED
 } device_optional_e;
 
 typedef enum device_index_e {
-    DEVICE_NORMAL,
-    DEVICE_INDEXED
+    DEVICE_IS_NORMAL,
+    DEVICE_IS_INDEXED
 } device_index_e;
 
 typedef enum device_unique_e {
-    DEVICE_REPEATED,
-    DEVICE_UNIQUE
+    DEVICE_IS_REPEATED,
+    DEVICE_IS_UNIQUE
 } device_unique_e;
 
 typedef enum device_set_e {
-    DEVICE_SET_UNSET,
-    DEVICE_SET_SET,
-    DEVICE_SET_DEFAULT
+    DEVICE_IS_UNSET,
+    DEVICE_IS_SET,
+    DEVICE_IS_DEFAULT
 } device_set_e;
 
 typedef struct device_pair_selects_t {
@@ -584,7 +584,7 @@ static apr_status_t device_parse_index(device_set_t *ds, device_pair_t *pair,
                     link->dest = linkpath;
                     link->key = pair->key;
                     link->val = apr_pstrdup(ds->pool, dirent.name);
-                    link->index = DEVICE_NORMAL;
+                    link->index = DEVICE_IS_NORMAL;
 
                 }
             }
@@ -622,7 +622,7 @@ static apr_status_t device_parse_index(device_set_t *ds, device_pair_t *pair,
         tfiles = files;
 
         /* suppress the unique check */
-        pair->unique = DEVICE_REPEATED;
+        pair->unique = DEVICE_IS_REPEATED;
     }
 
     if (option) {
@@ -845,7 +845,7 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
         return APR_EGENERAL;
     }
 
-    if (pair->optional == DEVICE_OPTIONAL) {
+    if (pair->optional == DEVICE_IS_OPTIONAL) {
         none = DEVICE_SELECT_NONE;
     }
 
@@ -922,7 +922,7 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
 
                     opt = apr_array_push(options);
                     opt[0] = apr_pstrcat(ds->pool,
-                            pair->optional == DEVICE_OPTIONAL ? "-" : "*",
+                            pair->optional == DEVICE_IS_OPTIONAL ? "-" : "*",
                             device_pescape_shell(ds->pool, pair->key), "=",
                             device_pescape_shell(ds->pool, buffer),
                             NULL);
@@ -1224,7 +1224,7 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
         return APR_EGENERAL;
     }
 
-    if (pair->optional == DEVICE_OPTIONAL) {
+    if (pair->optional == DEVICE_IS_OPTIONAL) {
         none = DEVICE_SYMLINK_NONE;
     }
 
@@ -1300,7 +1300,7 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
 
                     opt = apr_array_push(options);
                     opt[0] = apr_pstrcat(ds->pool,
-                            pair->optional == DEVICE_OPTIONAL ? "-" : "*",
+                            pair->optional == DEVICE_IS_OPTIONAL ? "-" : "*",
                             device_pescape_shell(ds->pool, pair->key), "=",
                             device_pescape_shell(ds->pool, name),
                             NULL);
@@ -1612,7 +1612,7 @@ static apr_status_t device_parse_user(device_set_t *ds, device_pair_t *pair,
         option[0] = NULL; /* until further notice */
     }
 
-    if (pair->optional == DEVICE_OPTIONAL) {
+    if (pair->optional == DEVICE_IS_OPTIONAL) {
         none = DEVICE_SELECT_NONE;
     }
 
@@ -1665,7 +1665,7 @@ static apr_status_t device_parse_user(device_set_t *ds, device_pair_t *pair,
 
                 opt = apr_array_push(options);
                 opt[0] = apr_pstrcat(ds->pool,
-                        pair->optional == DEVICE_OPTIONAL ? "-" : "*",
+                        pair->optional == DEVICE_IS_OPTIONAL ? "-" : "*",
                         device_pescape_shell(ds->pool, pair->key), "=",
                         device_pescape_shell(ds->pool, user),
                         NULL);
@@ -1742,7 +1742,7 @@ static apr_status_t device_parse_user(device_set_t *ds, device_pair_t *pair,
 
                         opt = apr_array_push(options);
                         opt[0] = apr_pstrcat(ds->pool,
-                                pair->optional == DEVICE_OPTIONAL ? "-" : "*",
+                                pair->optional == DEVICE_IS_OPTIONAL ? "-" : "*",
                                 device_pescape_shell(ds->pool, pair->key), "=",
                                 device_pescape_shell(ds->pool, user),
                                 NULL);
@@ -1832,7 +1832,7 @@ static apr_status_t device_parse_distinguished_name(device_set_t *ds, device_pai
         option[0] = NULL; /* until further notice */
     }
 
-    if (pair->optional == DEVICE_REQUIRED && !arglen) {
+    if (pair->optional == DEVICE_IS_REQUIRED && !arglen) {
         apr_file_printf(ds->err, "'%s' is required\n", pair->key);
         return APR_EGENERAL;
     }
@@ -2533,7 +2533,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
             }
         }
 
-        if (file->index == DEVICE_INDEXED) {
+        if (file->index == DEVICE_IS_INDEXED) {
             keyval = file->val;
         }
 
@@ -2615,7 +2615,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
                 apr_file_printf(ds->err, "cannot remove '%s': %pm\n", file->key, &status);
             }
 
-            if (file->index == DEVICE_INDEXED) {
+            if (file->index == DEVICE_IS_INDEXED) {
 
             }
         }
@@ -2798,7 +2798,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
 
             if (!key || !key[0] || !strncmp(key, pair->key, strlen(key))) {
                 apr_file_printf(ds->out, "%c%s=\n",
-                        pair->optional == DEVICE_OPTIONAL ? '-' : '*',
+                        pair->optional == DEVICE_IS_OPTIONAL ? '-' : '*',
                         device_pescape_shell(ds->pool, pair->key));
             }
 
@@ -3060,9 +3060,9 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             return status;
         }
 
-        pair->set = DEVICE_SET_SET;
+        pair->set = DEVICE_IS_SET;
 
-        if (pair->unique == DEVICE_UNIQUE) {
+        if (pair->unique == DEVICE_IS_UNIQUE) {
 
             /* index must be unique */
 
@@ -3083,7 +3083,7 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
 
         }
 
-        if (pair->optional == DEVICE_REQUIRED && !file->val) {
+        if (pair->optional == DEVICE_IS_REQUIRED && !file->val) {
             apr_file_printf(ds->err, "'%s' is required, and cannot be unset.\n",
                     apr_pescape_echo(ds->pool, key, 1));
             return APR_EINVAL;
@@ -3151,7 +3151,7 @@ static apr_status_t device_add(device_set_t *ds, const char **args)
             apr_hash_this(hi, NULL, NULL, &v);
             pair = v;
 
-            if (pair->set != DEVICE_SET_SET) {
+            if (pair->set != DEVICE_IS_SET) {
 
                 status = device_default(ds, pair, files);
 
@@ -3159,8 +3159,8 @@ static apr_status_t device_add(device_set_t *ds, const char **args)
                     return status;
                 }
 
-                if (pair->optional == DEVICE_REQUIRED
-                        && pair->set == DEVICE_SET_UNSET) {
+                if (pair->optional == DEVICE_IS_REQUIRED
+                        && pair->set == DEVICE_IS_UNSET) {
                     apr_file_printf(ds->err, "'%s' is required.\n",
                             apr_pescape_echo(ds->pool, pair->key, 1));
                     return APR_EINVAL;
@@ -3491,7 +3491,7 @@ int main(int argc, const char * const argv[])
     int optch;
     apr_status_t status = 0;
     int complete = 0;
-    device_optional_e optional = DEVICE_OPTIONAL;
+    device_optional_e optional = DEVICE_IS_OPTIONAL;
 
     apr_int64_t bytes_min = 0;
     apr_int64_t bytes_max = 0;
@@ -3546,11 +3546,11 @@ int main(int argc, const char * const argv[])
             break;
         }
         case 'o': {
-            optional = DEVICE_OPTIONAL;
+            optional = DEVICE_IS_OPTIONAL;
             break;
         }
         case 'r': {
-            optional = DEVICE_REQUIRED;
+            optional = DEVICE_IS_REQUIRED;
             break;
         }
         case 's': {
@@ -3574,7 +3574,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_INDEX_SUFFIX;
             pair->optional = optional;
-            pair->set = DEVICE_SET_DEFAULT;
+            pair->set = DEVICE_IS_DEFAULT;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
@@ -3832,13 +3832,13 @@ int main(int argc, const char * const argv[])
         if (index) {
 
             /* index parameter always required */
-            index->optional = DEVICE_REQUIRED;
+            index->optional = DEVICE_IS_REQUIRED;
 
             /* mark the index */
-            index->index = DEVICE_INDEXED;
+            index->index = DEVICE_IS_INDEXED;
 
             /* index must be unique until further notice */
-            index->unique = DEVICE_UNIQUE;
+            index->unique = DEVICE_IS_UNIQUE;
 
         }
         else {

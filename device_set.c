@@ -1038,7 +1038,7 @@ static apr_status_t device_parse_bytes(device_set_t *ds, device_pair_t *pair,
             const char **opt = apr_array_push(options); \
             const char **possible = apr_array_push(possibles); \
             opt[0] = apr_psprintf(ds->pool, "%c%s=%.*s%s", \
-                    pair->optional == DEVICE_OPTIONAL ? '-' : '*', \
+                    pair->optional == DEVICE_IS_OPTIONAL ? '-' : '*', \
                             device_pescape_shell(ds->pool, pair->key), \
                             (int)(end - arg), arg, unit); \
             possible[0] = apr_psprintf(ds->pool, "%.*s%s", (int)(end - arg), arg, unit); \

@@ -47,26 +47,28 @@
 #include <pwd.h>
 #endif
 
-#define DEVICE_INDEX 257
-#define DEVICE_PORT 258
-#define DEVICE_UNPRIVILEGED_PORT 259
-#define DEVICE_HOSTNAME 260
-#define DEVICE_FQDN 261
-#define DEVICE_SELECT 262
-#define DEVICE_SELECT_BASE 263
-#define DEVICE_BYTES 264
-#define DEVICE_BYTES_MIN 265
-#define DEVICE_BYTES_MAX 266
-#define DEVICE_SYMLINK 267
-#define DEVICE_SYMLINK_BASE 268
-#define DEVICE_SYMLINK_SUFFIX 269
-#define DEVICE_SQL_IDENTIFIER 270
-#define DEVICE_SQL_DELIMITED_IDENTIFIER 271
-#define DEVICE_SQL_IDENTIFIER_MIN 272
-#define DEVICE_SQL_IDENTIFIER_MAX 273
-#define DEVICE_USER_GROUP 274
-#define DEVICE_USER 275
-#define DEVICE_DISTINGUISHED_NAME 276
+#define DEVICE_OPTIONAL 257
+#define DEVICE_REQUIRED 258
+#define DEVICE_INDEX 259
+#define DEVICE_PORT 260
+#define DEVICE_UNPRIVILEGED_PORT 261
+#define DEVICE_HOSTNAME 262
+#define DEVICE_FQDN 263
+#define DEVICE_SELECT 264
+#define DEVICE_SELECT_BASE 265
+#define DEVICE_BYTES 266
+#define DEVICE_BYTES_MIN 267
+#define DEVICE_BYTES_MAX 268
+#define DEVICE_SYMLINK 269
+#define DEVICE_SYMLINK_BASE 270
+#define DEVICE_SYMLINK_SUFFIX 271
+#define DEVICE_SQL_IDENTIFIER 272
+#define DEVICE_SQL_DELIMITED_IDENTIFIER 273
+#define DEVICE_SQL_IDENTIFIER_MIN 274
+#define DEVICE_SQL_IDENTIFIER_MAX 275
+#define DEVICE_USER_GROUP 276
+#define DEVICE_USER 277
+#define DEVICE_DISTINGUISHED_NAME 278
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -216,8 +218,8 @@ static const apr_getopt_option_t
         "  -v, --version\t\t\tDisplay the version number." },
     { "base", 'b', 1, "  -b, --base=path\t\tBase path in which to search for option files." },
     { "complete", 'c', 0, "  -c, --complete\t\tPerform command line completion." },
-    { "optional", 'o', 0, "  -o, --optional\t\tOptions declared after this are optional. This\n\t\t\t\tis the default." },
-    { "required", 'r', 0, "  -r, --required\t\tOptions declared after this are required." },
+    { "optional", DEVICE_OPTIONAL, 0, "  --optional\t\t\tOptions declared after this are optional. This\n\t\t\t\tis the default." },
+    { "required", DEVICE_REQUIRED, 0, "  --required\t\t\tOptions declared after this are required." },
     { "add", 'a', 1, "  -a, --add=name\t\tAdd a new set of options, named by the key\n\t\t\t\tspecified, which becomes required. A file \n\t\t\t\tcalled '" DEVICE_ADD_MARKER "' will be created in the newly\n\t\t\t\tcreated directory to indicate the directory\n\t\t\t\tshould be processed." },
     { "remove", 'd', 1, "  -d, --remove=name\t\tRemove a set of options, named by the key\n\t\t\t\tspecified. The removal takes place immediately." },
     { "mark", 'm', 1, "  -m, --mark=name\t\tMark a set of options for removal, named by the\n\t\t\t\tkey specified. The actual removal is expected\n\t\t\t\tto be done by the script that processes this\n\t\t\t\toption. A file called '" DEVICE_REMOVE_MARKER "' will be created\n\t\t\t\tin the directory to indicate the directory\n\t\t\t\tshould be processed for removal." },
@@ -3545,11 +3547,11 @@ int main(int argc, const char * const argv[])
             ds.key = optarg;
             break;
         }
-        case 'o': {
+        case DEVICE_OPTIONAL: {
             optional = DEVICE_IS_OPTIONAL;
             break;
         }
-        case 'r': {
+        case DEVICE_REQUIRED: {
             optional = DEVICE_IS_REQUIRED;
             break;
         }

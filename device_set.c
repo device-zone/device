@@ -85,7 +85,8 @@ typedef enum device_mode_e {
     DEVICE_SET,
     DEVICE_ADD,
     DEVICE_REMOVE,
-    DEVICE_MARK
+    DEVICE_MARK,
+    DEVICE_REINDEX,
 } device_mode_e;
 
 typedef struct device_set_t {
@@ -578,15 +579,18 @@ static apr_status_t device_parse_index(device_set_t *ds, device_pair_t *pair,
                     file->val = val;
                     file->index = pair->index;
 
-                    /* add symlink */
-                    link = apr_array_push(tfiles);
-                    link->type = APR_LNK;
-                    link->order = order;
+                    if (pair->index == DEVICE_IS_INDEXED) {
 
-                    link->dest = linkpath;
-                    link->key = pair->key;
-                    link->val = apr_pstrdup(ds->pool, dirent.name);
-                    link->index = DEVICE_IS_NORMAL;
+                        /* add symlink */
+                        link = apr_array_push(tfiles);
+                        link->type = APR_LNK;
+                        link->order = order;
+
+                        link->dest = linkpath;
+                        link->key = pair->key;
+                        link->val = apr_pstrdup(ds->pool, dirent.name);
+                        link->index = DEVICE_IS_NORMAL;
+                    }
 
                 }
             }
@@ -3553,6 +3557,11 @@ int main(int argc, const char * const argv[])
         }
         case DEVICE_REQUIRED: {
             optional = DEVICE_IS_REQUIRED;
+            break;
+        }
+        case 'r': {
+            ds.mode = DEVICE_REINDEX;
+            ds.key = optarg;
             break;
         }
         case 's': {

@@ -2712,7 +2712,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
         count += 2;
     }
 
-    if (ds->mode == DEVICE_REMOVE) {
+    if (ds->mode == DEVICE_REMOVE || ds->mode == DEVICE_MARK) {
         if (value) {
             /* more than one arg is not ok */
             apr_file_printf(ds->err, "complete has more than one argument.\n");

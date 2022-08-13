@@ -2621,7 +2621,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
             device_file_t *file = &APR_ARRAY_IDX(files, i, device_file_t);
 
-            if (APR_SUCCESS != (status = apr_file_rename(file->template, file->dest, ds->pool))
+            if (file->template && APR_SUCCESS != (status = apr_file_rename(file->template, file->dest, ds->pool))
                     && !APR_STATUS_IS_ENOENT(status)) {
                 apr_file_printf(ds->err, "cannot move '%s': %pm\n", file->key, &status);
             }

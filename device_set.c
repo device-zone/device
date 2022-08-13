@@ -3518,6 +3518,7 @@ static apr_status_t device_reindex(device_set_t *ds, const char **args)
             apr_finfo_t dirent;
 
             apr_array_header_t *tfiles = apr_array_make(ds->pool, 16, sizeof(device_file_t));
+            apr_array_header_t *sfiles = apr_array_make(ds->pool, 16, sizeof(device_file_t));
 
             int i, nelts;
 
@@ -3644,6 +3645,25 @@ static apr_status_t device_reindex(device_set_t *ds, const char **args)
 
                     break;
                 }
+                case APR_LNK: {
+
+                    if (pair->index == DEVICE_IS_INDEXED) {
+
+                        device_file_t *old;
+
+                        /* remove old index */
+                        old = apr_array_push(sfiles);
+                        old->type = APR_LNK;
+
+                        old->dest = apr_pstrdup(ds->pool, dirent.name);
+                        old->key = pair->key;
+                        old->val = NULL; /* delete the index */
+                        old->index = pair->index;
+
+                    }
+
+                    break;
+                }
                 default:
                     break;
                 }
@@ -3664,6 +3684,8 @@ static apr_status_t device_reindex(device_set_t *ds, const char **args)
                 return status;
             }
 
+            apr_array_cat(files, sfiles);
+
             /* sort tfiles small to large so reindex doesn't stomp on files */
             qsort(tfiles->elts, tfiles->nelts, tfiles->elt_size, files_asc);
 
@@ -3673,34 +3695,24 @@ static apr_status_t device_reindex(device_set_t *ds, const char **args)
 
                 device_file_t *file = &APR_ARRAY_IDX(tfiles, i, device_file_t);
 
-                /* nothing to change? skip */
-                if (file->order == i) {
+                val = apr_psprintf(ds->pool, "%d", i);
 
-                    file->type = APR_NOFILE;
+                if (file->index == DEVICE_IS_INDEXED) {
 
+                    device_file_t *link;
+
+                    /* add symlink */
+                    link = apr_array_push(tfiles);
+                    link->type = APR_LNK;
+                    link->order = i;
+
+                    link->dest = val;
+                    link->key = pair->key;
+                    link->val = file->val;
+                    link->index = DEVICE_IS_NORMAL;
                 }
-                else {
 
-                    val = apr_psprintf(ds->pool, "%d", i);
-
-                    if (file->index == DEVICE_IS_INDEXED) {
-
-                        device_file_t *link;
-
-                        /* add symlink */
-                        link = apr_array_push(tfiles);
-                        link->type = APR_LNK;
-                        link->order = i;
-
-                        link->dest = val;
-                        link->key = pair->key;
-                        link->val = file->val;
-                        link->index = DEVICE_IS_NORMAL;
-                    }
-
-                    file->val = val;
-
-                }
+                file->val = val;
 
             }
 

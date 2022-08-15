@@ -2300,14 +2300,14 @@ static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
                 keyname = apr_pstrcat(pool, ds->relation_name, ds->relation_suffix, NULL);
                 if (APR_SUCCESS
                         != (status = apr_filepath_merge(&keypath, base, dirent.name,
-                                APR_FILEPATH_NOTABSOLUTE, pool))) {
+                        		APR_FILEPATH_NATIVE, pool))) {
                     apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
                             &status);
                 }
 
                 else if (APR_SUCCESS
                         != (status = apr_filepath_merge(&keyfile, keypath,
-                                keyname, APR_FILEPATH_NOTABSOLUTE, pool))) {
+                                keyname, APR_FILEPATH_NATIVE, pool))) {
                     apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
                             &status);
                 }

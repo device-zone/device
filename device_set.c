@@ -79,6 +79,7 @@
 #define DEVICE_SQL_SUFFIX ".txt"
 #define DEVICE_USER_SUFFIX ".txt"
 #define DEVICE_DISTINGUISHED_NAME_SUFFIX ".txt"
+#define DEVICE_DIR_SUFFIX ".d"
 #define DEVICE_NONE_SUFFIX ""
 
 #define DEVICE_ADD_MARKER "added"
@@ -4326,7 +4327,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_RELATION;
             pair->key = optarg;
-            pair->suffix = ds.relation_suffix ? ds.relation_suffix  : DEVICE_NONE_SUFFIX;
+            pair->suffix = DEVICE_DIR_SUFFIX;
             pair->optional = optional;
             pair->r.bases = ds.relation_bases;
 

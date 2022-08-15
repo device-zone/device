@@ -3074,6 +3074,9 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
 
     }
 
+    apr_file_flush(ds->out);
+    apr_file_flush(ds->err);
+
     return status;
 }
 

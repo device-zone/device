@@ -69,6 +69,10 @@
 #define DEVICE_USER_GROUP 276
 #define DEVICE_USER 277
 #define DEVICE_DISTINGUISHED_NAME 278
+#define DEVICE_RELATION_BASE 279
+#define DEVICE_RELATION_NAME 280
+#define DEVICE_RELATION_SUFFIX 281
+#define DEVICE_RELATION 282
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -103,8 +107,13 @@ typedef struct device_set_t {
     apr_array_header_t *user_groups;
     apr_array_header_t *select_bases;
     apr_array_header_t *symlink_bases;
+    apr_array_header_t *relation_bases;
     const char *symlink_suffix;
     int symlink_suffix_len;
+    const char *relation_name;
+    int relation_name_len;
+    const char *relation_suffix;
+    int relation_suffix_len;
     device_mode_e mode;
 } device_set_t;
 
@@ -136,7 +145,8 @@ typedef enum device_pair_e {
     DEVICE_PAIR_SQL_IDENTIFIER,
     DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER,
     DEVICE_PAIR_USER,
-    DEVICE_PAIR_DISTINGUISHED_NAME
+    DEVICE_PAIR_DISTINGUISHED_NAME,
+    DEVICE_PAIR_RELATION,
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -173,6 +183,10 @@ typedef struct device_pair_symlinks_t {
     apr_array_header_t *bases;
 } device_pair_symlinks_t;
 
+typedef struct device_pair_relations_t {
+    apr_array_header_t *bases;
+} device_pair_relations_t;
+
 typedef struct device_pair_sqlid_t {
     apr_int64_t min;
     apr_int64_t max;
@@ -196,6 +210,7 @@ typedef struct device_pair_t {
         device_pair_symlinks_t s;
         device_pair_sqlid_t q;
         device_pair_users_t u;
+        device_pair_relations_t r;
     };
 } device_pair_t;
 
@@ -227,6 +242,9 @@ static const apr_getopt_option_t
     { "set", 's', 1, "  -s, --set=name\t\tSet an option among a set of options, named by\n\t\t\t\tthe key specified. A file called '" DEVICE_SET_MARKER "' is\n\t\t\t\tcreated to indicate that settings should be\n\t\t\t\tprocessed for update." },
     { "reindex", 'r', 1, "  -r, --reindex=name\t\tReindex all options of type index, removing gaps\n\t\t\t\tin numbering. Multiple indexes can be specified\n\t\t\t\tat the same time." },
     { "index", DEVICE_INDEX, 1, "  --index=name\t\t\tSet the index of this option within a set of\n\t\t\t\toptions. If set to a positive integer starting\n\t\t\t\tfrom zero, this option will be inserted at the\n\t\t\t\tgiven index and higher options moved one up to\n\t\t\t\tfit. If unset, or if larger than the index of\n\t\t\t\tthe last option, this option will be set as the\n\t\t\t\tlast option and others moved down to fit. If\n\t\t\t\tnegative, the option will be inserted at the\n\t\t\t\tend counting backwards." },
+#if 0
+    { "unique", DEVICE_UNIQUE, 1, "  --unique=name[,name]\tForce the set of options to be unique. A search will be performed of the given options, and if found, the attempt to add or set will fail." },
+#endif
     { "port", DEVICE_PORT, 1, "  --port=name\t\t\tParse a port. Ports are integers in the range\n\t\t\t\t0 to 65535." },
     { "unprivileged-port", DEVICE_UNPRIVILEGED_PORT, 1, "  --unprivileged-port=name\tParse an unprivileged port. Unprivileged ports\n\t\t\t\tare integers in the range 1025 to 49151." },
     { "hostname", DEVICE_HOSTNAME, 1, "  --hostname=name\t\tParse a hostname. Hostnames consist of the\n\t\t\t\tcharacters a-z, 0-9, or a hyphen. Hostname\n\t\t\t\tcannot start with a hyphen." },
@@ -246,6 +264,10 @@ static const apr_getopt_option_t
     { "user-group", DEVICE_USER_GROUP, 1, "  --unix-group=name\t\tLimit usernames to members of the given group. May\n\t\t\t\tbe specified more than once." },
     { "user", DEVICE_USER, 1, "  --user=name\t\t\tParse a user that exists on the system." },
     { "distinguished-name", DEVICE_DISTINGUISHED_NAME, 1, "  --distinguished-name=name\tParse an RFC4514 Distinguished Name." },
+    { "relation-base", DEVICE_RELATION_BASE, 1, "  --relation-base=path\t\tBase path containing targets for related indexes.\n\t\t\t\tMore than one path can be specified. In the case\n\t\t\t\tof collision, the earliest match wins." },
+    { "relation-name", DEVICE_RELATION_NAME, 1, "  --relation-name=name\t\tName of the file containing the related index. This\n\t\t\t\tfile is expected to exist under directories in the\n\t\t\t\tbase directory." },
+    { "relation-suffix", DEVICE_RELATION_SUFFIX, 1, "  --relation-suffix=suffix\tLimit targets for relations to this suffix." },
+    { "relation", DEVICE_RELATION, 1, "  --relation=name\t\tParse a selection from a set of related\n\t\t\t\tdirectories beneath the related-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
     { NULL }
 };
 
@@ -2189,6 +2211,230 @@ static apr_status_t device_parse_distinguished_name(device_set_t *ds, device_pai
 
 }
 
+/**
+ * Relation is a name that will be linked to a given file beneath directories at
+ * a target path.
+ */
+static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    const char *none = NULL;
+    apr_status_t status;
+    apr_size_t arglen = arg ? strlen(arg) : 0;
+
+    apr_pool_t *pool;
+
+    apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
+
+    int i;
+
+    if (option) {
+        option[0] = NULL; /* until further notice */
+    }
+
+    if (!ds->relation_name) {
+        apr_file_printf(ds->err, "no relation name specified for '%s'\n", pair->key);
+        return APR_EGENERAL;
+    }
+
+    if (!pair->r.bases) {
+        apr_file_printf(ds->err, "no base directory specified for '%s'\n", pair->key);
+        return APR_EGENERAL;
+    }
+
+    if (pair->optional == DEVICE_IS_OPTIONAL) {
+        none = DEVICE_SYMLINK_NONE;
+    }
+
+    apr_pool_create(&pool, ds->pool);
+
+    for (i = 0; i < pair->r.bases->nelts; i++) {
+
+        apr_dir_t *thedir;
+        apr_finfo_t dirent;
+
+        const char *base = APR_ARRAY_IDX(pair->r.bases, i, const char *);
+
+        if ((status = apr_dir_open(&thedir, base, ds->pool)) != APR_SUCCESS) {
+            /* could not open directory, skip */
+            continue;
+        }
+
+        do {
+            const char **possible;
+            char *name;
+            char *keypath;
+
+            int exact;
+
+            apr_pool_clear(pool);
+
+            if (none) {
+
+                name = apr_pstrdup(ds->pool, none);
+                keypath = NULL;
+
+            } else {
+
+                apr_file_t *in;
+
+                const char *keyname;
+                char *keyfile;
+
+                apr_off_t end = 0, start = 0;
+
+                status = apr_dir_read(&dirent,
+                        APR_FINFO_TYPE | APR_FINFO_NAME | APR_FINFO_WPROT, thedir);
+                if (APR_STATUS_IS_INCOMPLETE(status)) {
+                    continue; /* ignore un-stat()able files */
+                } else if (status != APR_SUCCESS) {
+                    break;
+                }
+
+                /* hidden files are ignored */
+                if (dirent.name[0] == '.' || dirent.filetype != APR_DIR) {
+                    continue;
+                }
+
+                keyname = apr_pstrcat(pool, ds->relation_name, ds->relation_suffix, NULL);
+                if (APR_SUCCESS
+                        != (status = apr_filepath_merge(&keypath, base, dirent.name,
+                                APR_FILEPATH_NOTABSOLUTE, pool))) {
+                    apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                else if (APR_SUCCESS
+                        != (status = apr_filepath_merge(&keyfile, keypath,
+                                keyname, APR_FILEPATH_NOTABSOLUTE, pool))) {
+                    apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                /* open the key */
+                else if (APR_SUCCESS
+                        != (status = apr_file_open(&in, keyfile, APR_FOPEN_READ,
+                                APR_FPROT_OS_DEFAULT, pool))) {
+                    apr_file_printf(ds->err, "cannot open option set '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                /* how long is the key? */
+                else if (APR_SUCCESS
+                        != (status = apr_file_seek(in, APR_END, &end))) {
+                    apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                /* back to the beginning */
+                else if (APR_SUCCESS
+                        != (status = apr_file_seek(in, APR_SET, &start))) {
+                    apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                else {
+                    int size = end + 1;
+                    name = apr_palloc(pool, size);
+
+                    status = apr_file_gets(name, size, in);
+
+                    if (APR_EOF == status) {
+                        status = APR_SUCCESS;
+                    }
+                    if (APR_SUCCESS == status) {
+                        /* short circuit, all good */
+                        name = trim(name);
+                    }
+                    else {
+                        apr_file_printf(ds->err, "cannot read option set '%s': %pm\n", pair->key,
+                                &status);
+                    }
+                }
+
+                if (status != APR_SUCCESS) {
+                    continue;
+                }
+
+            }
+
+            exact = (0 == strcmp(arg, name));
+
+            possible = apr_array_push(possibles);
+            possible[0] = apr_pstrdup(possibles->pool, name);
+
+            if (!strncmp(arg, name, arglen)) {
+
+                const char **opt;
+
+                if (exact) {
+                    apr_array_clear(options);
+                }
+
+                opt = apr_array_push(options);
+                opt[0] = apr_pstrcat(ds->pool,
+                        pair->optional == DEVICE_IS_OPTIONAL ? "-" : "*",
+                        device_pescape_shell(ds->pool, pair->key), "=",
+                        device_pescape_shell(ds->pool, name),
+                        NULL);
+
+                if (option) {
+
+                    if (none) {
+                        option[0] = NULL;
+                    }
+                    else {
+                        option[0] = apr_pstrdup(ds->pool, keypath);
+                    }
+
+                }
+            }
+
+            if (exact) {
+
+                /* exact matches short circuit */
+                apr_dir_close(thedir);
+
+                goto done;
+            }
+
+            none = NULL;
+
+        } while (1);
+
+        apr_dir_close(thedir);
+
+    }
+done:
+
+    if (APR_SUCCESS == status) {
+        /* short circuit, all good */
+    }
+    else if (APR_STATUS_IS_ENOENT(status)) {
+
+        if (option) {
+            if (options->nelts == 1) {
+                /* all ok */
+                status = APR_SUCCESS;
+            }
+            else {
+                device_error_possibles(ds, pair->key, possibles);
+
+                status = APR_INCOMPLETE;
+            }
+        }
+
+    }
+    else {
+        apr_file_printf(ds->err, "cannot read option '%s': %pm\n", pair->key,
+                &status);
+    }
+
+    apr_pool_destroy(pool);
+
+    return status;
+}
+
 static apr_status_t device_get(device_set_t *ds, const char *arg,
         apr_array_header_t *options, const char **option, const char **path,
         int *exact)
@@ -2783,6 +3029,9 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             case DEVICE_PAIR_DISTINGUISHED_NAME:
                 status = device_parse_distinguished_name(ds, pair, value, options, NULL);
                 break;
+            case DEVICE_PAIR_RELATION:
+                status = device_parse_relation(ds, pair, value, options, NULL);
+                break;
             default:
                 status = APR_EINVAL;
             }
@@ -3060,6 +3309,10 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             break;
         case DEVICE_PAIR_DISTINGUISHED_NAME:
             status = device_parse_distinguished_name(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_RELATION:
+            status = device_parse_relation(ds, pair, val, options, &val);
+            type = APR_LNK;
             break;
         }
 
@@ -4065,6 +4318,44 @@ int main(int argc, const char * const argv[])
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            break;
+        }
+        case DEVICE_RELATION: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_RELATION;
+            pair->key = optarg;
+            pair->suffix = ds.relation_suffix ? ds.relation_suffix  : DEVICE_NONE_SUFFIX;
+            pair->optional = optional;
+            pair->r.bases = ds.relation_bases;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            ds.relation_bases = NULL;
+
+            break;
+        }
+        case DEVICE_RELATION_BASE: {
+
+            const char **base;
+
+            if (!ds.relation_bases) {
+                ds.relation_bases = apr_array_make(ds.pool, 2, sizeof(const char *));
+            }
+            base = apr_array_push(ds.relation_bases);
+            base[0]= optarg;
+
+            break;
+        }
+        case DEVICE_RELATION_NAME: {
+            ds.relation_name = optarg;
+            ds.relation_name_len = strlen(optarg);
+            break;
+        }
+        case DEVICE_RELATION_SUFFIX: {
+            ds.relation_suffix = optarg;
+            ds.relation_suffix_len = strlen(optarg);
             break;
         }
         }

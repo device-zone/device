@@ -73,6 +73,10 @@
 #define DEVICE_RELATION_NAME 280
 #define DEVICE_RELATION_SUFFIX 281
 #define DEVICE_RELATION 282
+#define DEVICE_POLAR 283
+#define DEVICE_POLAR_DEFAULT 284
+#define DEVICE_SWITCH 285
+#define DEVICE_SWITCH_DEFAULT 286
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -80,6 +84,7 @@
 #define DEVICE_USER_SUFFIX ".txt"
 #define DEVICE_DISTINGUISHED_NAME_SUFFIX ".txt"
 #define DEVICE_DIR_SUFFIX ".d"
+#define DEVICE_ENABLED_SUFFIX ".bin"
 #define DEVICE_NONE_SUFFIX ""
 
 #define DEVICE_ADD_MARKER "added"
@@ -133,6 +138,8 @@ typedef struct device_set_t {
 #define DEVICE_SQL_IDENTIFIER_DEFAULT_MIN 1
 #define DEVICE_SQL_IDENTIFIER_DEFAULT_MAX 63
 #define DEVICE_FILE_UMASK (0x0113)
+#define DEVICE_POLAR_DEFAULT_VAL DEVICE_IS_NO
+#define DEVICE_SWITCH_DEFAULT_VAL DEVICE_IS_OFF
 
 typedef enum device_pair_e {
     DEVICE_PAIR_INDEX,
@@ -148,6 +155,8 @@ typedef enum device_pair_e {
     DEVICE_PAIR_USER,
     DEVICE_PAIR_DISTINGUISHED_NAME,
     DEVICE_PAIR_RELATION,
+    DEVICE_PAIR_POLAR,
+    DEVICE_PAIR_SWITCH,
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -164,6 +173,16 @@ typedef enum device_unique_e {
     DEVICE_IS_REPEATED,
     DEVICE_IS_UNIQUE
 } device_unique_e;
+
+typedef enum device_polar_e {
+    DEVICE_IS_NO,
+    DEVICE_IS_YES
+} device_polar_e;
+
+typedef enum device_switch_e {
+    DEVICE_IS_OFF,
+    DEVICE_IS_ON
+} device_switch_e;
 
 typedef enum device_set_e {
     DEVICE_IS_UNSET,
@@ -197,6 +216,14 @@ typedef struct device_pair_users_t {
     apr_array_header_t *groups;
 } device_pair_users_t;
 
+typedef struct device_pair_polars_t {
+    device_polar_e polar_default;
+} device_pair_polars_t;
+
+typedef struct device_pair_switches_t {
+    device_switch_e switch_default;
+} device_pair_switches_t;
+
 typedef struct device_pair_t {
     const char *key;
     const char *suffix;
@@ -212,6 +239,8 @@ typedef struct device_pair_t {
         device_pair_sqlid_t q;
         device_pair_users_t u;
         device_pair_relations_t r;
+        device_pair_polars_t p;
+        device_pair_switches_t sw;
     };
 } device_pair_t;
 
@@ -269,6 +298,10 @@ static const apr_getopt_option_t
     { "relation-name", DEVICE_RELATION_NAME, 1, "  --relation-name=name\t\tName of the file containing the related index. This\n\t\t\t\tfile is expected to exist under directories in the\n\t\t\t\tbase directory." },
     { "relation-suffix", DEVICE_RELATION_SUFFIX, 1, "  --relation-suffix=suffix\tLimit targets for relations to this suffix." },
     { "relation", DEVICE_RELATION, 1, "  --relation=name\t\tParse a selection from a set of related\n\t\t\t\tdirectories beneath the related-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
+    { "polar-default", DEVICE_POLAR_DEFAULT, 1, "  --polar-default=[yes|no]\tPolar question default value, 'yes' or 'no'." },
+    { "polar", DEVICE_POLAR, 1, "  --polar=name\t\t\tParse a polar question, with possible values\n\t\t\t\t'yes' and 'no'." },
+    { "switch-default", DEVICE_SWITCH_DEFAULT, 1, "  --switch-default=[on|off]\tSwitch default value, 'on' or 'off'." },
+    { "switch", DEVICE_SWITCH, 1, "  --switch=name\t\t\tParse a switch, with possible values 'on' and 'off'." },
     { NULL }
 };
 
@@ -2300,7 +2333,7 @@ static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
                 keyname = apr_pstrcat(pool, ds->relation_name, ds->relation_suffix, NULL);
                 if (APR_SUCCESS
                         != (status = apr_filepath_merge(&keypath, base, dirent.name,
-                        		APR_FILEPATH_NATIVE, pool))) {
+                                APR_FILEPATH_NATIVE, pool))) {
                     apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
                             &status);
                 }
@@ -2434,6 +2467,134 @@ done:
     apr_pool_destroy(pool);
 
     return status;
+}
+
+/**
+ * Polar is a string containing either the value "yes" or "no".
+ */
+static apr_status_t device_parse_polar(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    apr_size_t arglen = arg ? strlen(arg) : 0;
+
+    const char **opt;
+
+    if (option) {
+        option[0] = NULL; /* until further notice */
+    }
+
+    if (!strncmp(arg, "yes", arglen)) {
+
+        if (!strcmp(arg, "yes")) {
+            apr_array_clear(options);
+        }
+
+        opt = apr_array_push(options);
+        opt[0] = apr_pstrcat(ds->pool,
+                pair->optional == DEVICE_IS_OPTIONAL ? "-" : "*",
+                device_pescape_shell(ds->pool, pair->key), "=",
+                device_pescape_shell(ds->pool, "yes"),
+                NULL);
+
+        if (option) {
+            option[0] = ""; /* file exists and is empty */
+        }
+    }
+
+    if (!strncmp(arg, "no", arglen)) {
+
+        if (!strcmp(arg, "no")) {
+            apr_array_clear(options);
+        }
+
+        opt = apr_array_push(options);
+        opt[0] = apr_pstrcat(ds->pool,
+                pair->optional == DEVICE_IS_OPTIONAL ? "-" : "*",
+                device_pescape_shell(ds->pool, pair->key), "=",
+                device_pescape_shell(ds->pool, "no"),
+                NULL);
+
+        if (option) {
+            option[0] = NULL; /* file does not exist */
+        }
+    }
+
+    if (option) {
+        if (options->nelts == 1) {
+            /* all ok */
+        }
+        else {
+            apr_file_printf(ds->err, "%s: must be 'yes' or 'no'.\n",
+                apr_pescape_echo(ds->pool, arg, 1));
+            return APR_INCOMPLETE;
+        }
+    }
+
+    return APR_SUCCESS;
+}
+
+/**
+ * Switch is a string containing either the value "on" or "off".
+ */
+static apr_status_t device_parse_switch(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    apr_size_t arglen = arg ? strlen(arg) : 0;
+
+    const char **opt;
+
+    if (option) {
+        option[0] = NULL; /* until further notice */
+    }
+
+    if (!strncmp(arg, "on", arglen)) {
+
+        if (!strcmp(arg, "on")) {
+            apr_array_clear(options);
+        }
+
+        opt = apr_array_push(options);
+        opt[0] = apr_pstrcat(ds->pool,
+                pair->optional == DEVICE_IS_OPTIONAL ? "-" : "*",
+                device_pescape_shell(ds->pool, pair->key), "=",
+                device_pescape_shell(ds->pool, "on"),
+                NULL);
+
+        if (option) {
+            option[0] = ""; /* file exists and is empty */
+        }
+    }
+
+    if (!strncmp(arg, "off", arglen)) {
+
+        if (!strcmp(arg, "off")) {
+            apr_array_clear(options);
+        }
+
+        opt = apr_array_push(options);
+        opt[0] = apr_pstrcat(ds->pool,
+                pair->optional == DEVICE_IS_OPTIONAL ? "-" : "*",
+                device_pescape_shell(ds->pool, pair->key), "=",
+                device_pescape_shell(ds->pool, "off"),
+                NULL);
+
+        if (option) {
+            option[0] = NULL; /* file does not exist */
+        }
+    }
+
+    if (option) {
+        if (options->nelts == 1) {
+            /* all ok */
+        }
+        else {
+            apr_file_printf(ds->err, "%s: must be 'on' or 'off'.\n",
+                apr_pescape_echo(ds->pool, arg, 1));
+            return APR_INCOMPLETE;
+        }
+    }
+
+    return APR_SUCCESS;
 }
 
 static apr_status_t device_get(device_set_t *ds, const char *arg,
@@ -3033,6 +3194,13 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             case DEVICE_PAIR_RELATION:
                 status = device_parse_relation(ds, pair, value, options, NULL);
                 break;
+            case DEVICE_PAIR_POLAR:
+                status = device_parse_polar(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_SWITCH:
+                status = device_parse_switch(ds, pair, value, options, NULL);
+                break;
+
             default:
                 status = APR_EINVAL;
             }
@@ -3244,6 +3412,46 @@ static apr_status_t device_default_index(device_set_t *ds, device_pair_t *pair,
     return APR_SUCCESS;
 }
 
+/*
+ * Default polar answer is the option given (yes/no).
+ */
+static apr_status_t device_default_polar(device_set_t *ds, device_pair_t *pair,
+        apr_array_header_t *files)
+{
+    device_file_t *file;
+
+    file = apr_array_push(files);
+    file->type = APR_REG;
+
+    file->dest = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
+    file->template = apr_pstrcat(ds->pool, file->dest, ".XXXXXX", NULL);
+    file->key = pair->key;
+    file->val = pair->p.polar_default ? "" : NULL;
+    file->index = pair->index;
+
+    return APR_SUCCESS;
+}
+
+/*
+ * Default switch is the option given (on/off).
+ */
+static apr_status_t device_default_switch(device_set_t *ds, device_pair_t *pair,
+        apr_array_header_t *files)
+{
+    device_file_t *file;
+
+    file = apr_array_push(files);
+    file->type = APR_REG;
+
+    file->dest = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
+    file->template = apr_pstrcat(ds->pool, file->dest, ".XXXXXX", NULL);
+    file->key = pair->key;
+    file->val = pair->sw.switch_default ? "" : NULL;
+    file->index = pair->index;
+
+    return APR_SUCCESS;
+}
+
 static apr_status_t device_default(device_set_t *ds, device_pair_t *pair, apr_array_header_t *files)
 {
     apr_status_t status;
@@ -3251,6 +3459,12 @@ static apr_status_t device_default(device_set_t *ds, device_pair_t *pair, apr_ar
     switch (pair->type) {
     case DEVICE_PAIR_INDEX:
         status = device_default_index(ds, pair, files);
+        break;
+    case DEVICE_PAIR_POLAR:
+        status = device_default_polar(ds, pair, files);
+        break;
+    case DEVICE_PAIR_SWITCH:
+        status = device_default_switch(ds, pair, files);
         break;
     default:
         status = APR_SUCCESS;
@@ -3317,6 +3531,12 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
         case DEVICE_PAIR_RELATION:
             status = device_parse_relation(ds, pair, val, options, &val);
             type = APR_LNK;
+            break;
+        case DEVICE_PAIR_POLAR:
+            status = device_parse_polar(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_SWITCH:
+            status = device_parse_switch(ds, pair, val, options, &val);
             break;
         }
 
@@ -4003,6 +4223,9 @@ int main(int argc, const char * const argv[])
     apr_int64_t sqlid_min = DEVICE_SQL_IDENTIFIER_DEFAULT_MIN;
     apr_int64_t sqlid_max = DEVICE_SQL_IDENTIFIER_DEFAULT_MAX;
 
+    device_polar_e polar_default = DEVICE_POLAR_DEFAULT_VAL;
+    device_switch_e switch_default = DEVICE_SWITCH_DEFAULT_VAL;
+
     /* lets get APR off the ground, and make sure it terminates cleanly */
     if (APR_SUCCESS != (status = apr_app_initialize(&argc, &argv, NULL))) {
         return 1;
@@ -4360,6 +4583,66 @@ int main(int argc, const char * const argv[])
         case DEVICE_RELATION_SUFFIX: {
             ds.relation_suffix = optarg;
             ds.relation_suffix_len = strlen(optarg);
+            break;
+        }
+        case DEVICE_POLAR: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_POLAR;
+            pair->key = optarg;
+            pair->suffix = DEVICE_ENABLED_SUFFIX;
+            pair->optional = optional;
+            pair->p.polar_default = polar_default;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_POLAR_DEFAULT: {
+
+            if (!strcmp(optarg, "yes")) {
+                polar_default = DEVICE_IS_YES;
+            }
+            else if (!strcmp(optarg, "no")) {
+                polar_default = DEVICE_IS_NO;
+            }
+            else {
+                apr_file_printf(ds.err, "argument '%s': is not 'yes' or 'no'.\n",
+                        apr_pescape_echo(ds.pool, optarg, 1));
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_SWITCH: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_SWITCH;
+            pair->key = optarg;
+            pair->suffix = DEVICE_ENABLED_SUFFIX;
+            pair->optional = optional;
+            pair->sw.switch_default = switch_default;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_SWITCH_DEFAULT: {
+
+            if (!strcmp(optarg, "on")) {
+                switch_default = DEVICE_IS_ON;
+            }
+            else if (!strcmp(optarg, "off")) {
+                switch_default = DEVICE_IS_OFF;
+            }
+            else {
+                apr_file_printf(ds.err, "argument '%s': is not 'on' or 'off'.\n",
+                        apr_pescape_echo(ds.pool, optarg, 1));
+                exit(2);
+            }
+
             break;
         }
         }

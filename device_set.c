@@ -312,8 +312,8 @@ static const apr_getopt_option_t
     { "polar", DEVICE_POLAR, 1, "  --polar=name\t\t\tParse a polar question, with possible values\n\t\t\t\t'yes' and 'no'." },
     { "switch-default", DEVICE_SWITCH_DEFAULT, 1, "  --switch-default=[on|off]\tSwitch default value, 'on' or 'off'." },
     { "switch", DEVICE_SWITCH, 1, "  --switch=name\t\t\tParse a switch, with possible values 'on' and 'off'." },
-    { "integer-minimum", DEVICE_INTEGER_MIN, 1, "  --integer-minimum=min\t\tLower limit used by the next integer option. \"min\"\n\t\t\t\tfor no limit." },
-    { "integer-maximum", DEVICE_INTEGER_MAX, 1, "  --integer-maximum=max\t\tUpper limit used by the next integer option. \"max\"\n\t\t\t\tfor no limit." },
+    { "integer-minimum", DEVICE_INTEGER_MIN, 1, "  --integer-minimum=min\t\tLower limit used by the next integer option. \"min\"\n\t\t\t\tfor down to -9,223,372,036,854,775,808." },
+    { "integer-maximum", DEVICE_INTEGER_MAX, 1, "  --integer-maximum=max\t\tUpper limit used by the next integer option. \"max\"\n\t\t\t\tfor up to 9,223,372,036,854,775,807." },
     { "integer", DEVICE_INTEGER, 1, "  --integer=number\t\t\tParse a 64 bit integer.\n\t\t\t\t." },
     { NULL }
 };
@@ -1479,10 +1479,10 @@ static apr_status_t device_parse_uint64(device_set_t *ds, const char *arg,
     }
 
     if (!strcmp(arg, "min")) {
-    	bytes = 0;
+        bytes = 0;
     }
     else if (!strcmp(arg, "max")) {
-    	bytes = APR_INT64_MAX;
+        bytes = APR_INT64_MAX;
     }
     else {
 
@@ -1516,10 +1516,10 @@ static apr_status_t device_parse_int64(device_set_t *ds, const char *arg,
     }
 
     if (!strcmp(arg, "min")) {
-    	bytes = 0;
+        bytes = 0;
     }
     else if (!strcmp(arg, "max")) {
-    	bytes = APR_INT64_MAX;
+        bytes = APR_INT64_MAX;
     }
     else {
 
@@ -2663,11 +2663,27 @@ static apr_status_t device_parse_switch(device_set_t *ds, device_pair_t *pair,
 static apr_status_t device_parse_integer(device_set_t *ds, device_pair_t *pair,
         const char *arg, apr_array_header_t *options, const char **option)
 {
-	apr_int64_t result;
+    apr_int64_t result;
 
     apr_status_t status = device_parse_int64(ds, arg, &result);
 
     if (APR_SUCCESS == status) {
+
+        if (!strcmp(arg, "min")) {
+            result = pair->i.min;
+        }
+        else if (!strcmp(arg, "max")) {
+            result = pair->i.max;
+        }
+
+        if (result < pair->i.min || result > pair->i.max) {
+            apr_file_printf(ds->err, "%s: must be between %"
+                APR_INT64_T_FMT " and %" APR_INT64_T_FMT ".\n",
+                apr_pescape_echo(ds->pool, arg, 1),
+                    pair->i.min, pair->i.max);
+            return APR_ERANGE;
+        }
+
         if (option) {
             option[0] = apr_ltoa(ds->pool, result);
         }

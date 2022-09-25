@@ -314,7 +314,7 @@ static const apr_getopt_option_t
     { "switch", DEVICE_SWITCH, 1, "  --switch=name\t\t\tParse a switch, with possible values 'on' and 'off'." },
     { "integer-minimum", DEVICE_INTEGER_MIN, 1, "  --integer-minimum=min\t\tLower limit used by the next integer option. \"min\"\n\t\t\t\tfor down to -9,223,372,036,854,775,808." },
     { "integer-maximum", DEVICE_INTEGER_MAX, 1, "  --integer-maximum=max\t\tUpper limit used by the next integer option. \"max\"\n\t\t\t\tfor up to 9,223,372,036,854,775,807." },
-    { "integer", DEVICE_INTEGER, 1, "  --integer=number\t\t\tParse a 64 bit integer.\n\t\t\t\t." },
+    { "integer", DEVICE_INTEGER, 1, "  --integer=number\t\tParse a 64 bit integer. Use \"min\" and \"max\" for lower\n\t\t\t\tand upper limit." },
     { NULL }
 };
 

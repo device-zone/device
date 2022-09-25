@@ -77,6 +77,9 @@
 #define DEVICE_POLAR_DEFAULT 284
 #define DEVICE_SWITCH 285
 #define DEVICE_SWITCH_DEFAULT 286
+#define DEVICE_INTEGER 287
+#define DEVICE_INTEGER_MIN 288
+#define DEVICE_INTEGER_MAX 289
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -157,6 +160,7 @@ typedef enum device_pair_e {
     DEVICE_PAIR_RELATION,
     DEVICE_PAIR_POLAR,
     DEVICE_PAIR_SWITCH,
+    DEVICE_PAIR_INTEGER,
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -195,8 +199,8 @@ typedef struct device_pair_selects_t {
 } device_pair_selects_t;
 
 typedef struct device_pair_bytes_t {
-    apr_int64_t min;
-    apr_int64_t max;
+    apr_uint64_t min;
+    apr_uint64_t max;
 } device_pair_bytes_t;
 
 typedef struct device_pair_symlinks_t {
@@ -208,8 +212,8 @@ typedef struct device_pair_relations_t {
 } device_pair_relations_t;
 
 typedef struct device_pair_sqlid_t {
-    apr_int64_t min;
-    apr_int64_t max;
+    apr_uint64_t min;
+    apr_uint64_t max;
 } device_pair_sqlid_t;
 
 typedef struct device_pair_users_t {
@@ -223,6 +227,11 @@ typedef struct device_pair_polars_t {
 typedef struct device_pair_switches_t {
     device_switch_e switch_default;
 } device_pair_switches_t;
+
+typedef struct device_pair_integer_t {
+    apr_int64_t min;
+    apr_int64_t max;
+} device_pair_integer_t;
 
 typedef struct device_pair_t {
     const char *key;
@@ -241,6 +250,7 @@ typedef struct device_pair_t {
         device_pair_relations_t r;
         device_pair_polars_t p;
         device_pair_switches_t sw;
+        device_pair_integer_t i;
     };
 } device_pair_t;
 
@@ -302,6 +312,9 @@ static const apr_getopt_option_t
     { "polar", DEVICE_POLAR, 1, "  --polar=name\t\t\tParse a polar question, with possible values\n\t\t\t\t'yes' and 'no'." },
     { "switch-default", DEVICE_SWITCH_DEFAULT, 1, "  --switch-default=[on|off]\tSwitch default value, 'on' or 'off'." },
     { "switch", DEVICE_SWITCH, 1, "  --switch=name\t\t\tParse a switch, with possible values 'on' and 'off'." },
+    { "integer-minimum", DEVICE_INTEGER_MIN, 1, "  --integer-minimum=min\t\tLower limit used by the next integer option. \"min\"\n\t\t\t\tfor no limit." },
+    { "integer-maximum", DEVICE_INTEGER_MAX, 1, "  --integer-maximum=max\t\tUpper limit used by the next integer option. \"max\"\n\t\t\t\tfor no limit." },
+    { "integer", DEVICE_INTEGER, 1, "  --integer=number\t\t\tParse a 64 bit integer.\n\t\t\t\t." },
     { NULL }
 };
 
@@ -1448,8 +1461,8 @@ done:
 /*
  * Parse a positive integer.
  */
-static apr_status_t device_parse_int64(device_set_t *ds, const char *arg,
-        apr_int64_t *result)
+static apr_status_t device_parse_uint64(device_set_t *ds, const char *arg,
+        apr_uint64_t *result)
 {
     char *end;
     apr_int64_t bytes;
@@ -1465,12 +1478,59 @@ static apr_status_t device_parse_int64(device_set_t *ds, const char *arg,
         return APR_EINVAL;
     }
 
-    bytes = apr_strtoi64(arg, &end, 10);
+    if (!strcmp(arg, "min")) {
+    	bytes = 0;
+    }
+    else if (!strcmp(arg, "max")) {
+    	bytes = APR_INT64_MAX;
+    }
+    else {
 
-    if (end[0]) {
-        apr_file_printf(ds->err, "number '%s' is not a number.\n",
-                apr_pescape_echo(ds->pool, arg, 1));
-        return APR_EINVAL;
+        bytes = apr_strtoi64(arg, &end, 10);
+
+        if (end[0]) {
+            apr_file_printf(ds->err, "number '%s' is not a number.\n",
+                    apr_pescape_echo(ds->pool, arg, 1));
+            return APR_EINVAL;
+        }
+
+    }
+
+    *result = bytes;
+
+    return APR_SUCCESS;
+}
+
+/*
+ * Parse a signed integer.
+ */
+static apr_status_t device_parse_int64(device_set_t *ds, const char *arg,
+        apr_int64_t *result)
+{
+    char *end;
+    apr_int64_t bytes;
+
+    if (!arg || !arg[0]) {
+        apr_file_printf(ds->err, "number is empty.\n");
+        return APR_INCOMPLETE;
+    }
+
+    if (!strcmp(arg, "min")) {
+    	bytes = 0;
+    }
+    else if (!strcmp(arg, "max")) {
+    	bytes = APR_INT64_MAX;
+    }
+    else {
+
+        bytes = apr_strtoi64(arg, &end, 10);
+
+        if (end[0]) {
+            apr_file_printf(ds->err, "number '%s' is not a number.\n",
+                    apr_pescape_echo(ds->pool, arg, 1));
+            return APR_EINVAL;
+        }
+
     }
 
     *result = bytes;
@@ -2597,6 +2657,25 @@ static apr_status_t device_parse_switch(device_set_t *ds, device_pair_t *pair,
     return APR_SUCCESS;
 }
 
+/*
+ * Integer is a signed 64 bit whole number.
+ */
+static apr_status_t device_parse_integer(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+	apr_int64_t result;
+
+    apr_status_t status = device_parse_int64(ds, arg, &result);
+
+    if (APR_SUCCESS == status) {
+        if (option) {
+            option[0] = apr_ltoa(ds->pool, result);
+        }
+    }
+
+    return status;
+}
+
 static apr_status_t device_get(device_set_t *ds, const char *arg,
         apr_array_header_t *options, const char **option, const char **path,
         int *exact)
@@ -3200,6 +3279,9 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             case DEVICE_PAIR_SWITCH:
                 status = device_parse_switch(ds, pair, value, options, NULL);
                 break;
+            case DEVICE_PAIR_INTEGER:
+                status = device_parse_integer(ds, pair, value, options, NULL);
+                break;
 
             default:
                 status = APR_EINVAL;
@@ -3537,6 +3619,9 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             break;
         case DEVICE_PAIR_SWITCH:
             status = device_parse_switch(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_INTEGER:
+            status = device_parse_integer(ds, pair, val, options, &val);
             break;
         }
 
@@ -4217,14 +4302,17 @@ int main(int argc, const char * const argv[])
     int complete = 0;
     device_optional_e optional = DEVICE_IS_OPTIONAL;
 
-    apr_int64_t bytes_min = 0;
-    apr_int64_t bytes_max = 0;
+    apr_uint64_t bytes_min = 0;
+    apr_uint64_t bytes_max = 0;
 
-    apr_int64_t sqlid_min = DEVICE_SQL_IDENTIFIER_DEFAULT_MIN;
-    apr_int64_t sqlid_max = DEVICE_SQL_IDENTIFIER_DEFAULT_MAX;
+    apr_uint64_t sqlid_min = DEVICE_SQL_IDENTIFIER_DEFAULT_MIN;
+    apr_uint64_t sqlid_max = DEVICE_SQL_IDENTIFIER_DEFAULT_MAX;
 
     device_polar_e polar_default = DEVICE_POLAR_DEFAULT_VAL;
     device_switch_e switch_default = DEVICE_SWITCH_DEFAULT_VAL;
+
+    apr_int64_t integer_min;;
+    apr_int64_t integer_max;
 
     /* lets get APR off the ground, and make sure it terminates cleanly */
     if (APR_SUCCESS != (status = apr_app_initialize(&argc, &argv, NULL))) {
@@ -4243,6 +4331,9 @@ int main(int argc, const char * const argv[])
     ds.path = argv[0];
 
     ds.pairs = apr_hash_make(ds.pool);
+
+    device_parse_int64(&ds, "min", &integer_min);
+    device_parse_int64(&ds, "max", &integer_max);
 
     apr_getopt_init(&opt, ds.pool, argc, argv);
     while ((status = apr_getopt_long(opt, cmdline_opts, &optch, &optarg))
@@ -4409,7 +4500,7 @@ int main(int argc, const char * const argv[])
         }
         case DEVICE_BYTES_MIN: {
 
-            status = device_parse_int64(&ds, optarg, &bytes_min);
+            status = device_parse_uint64(&ds, optarg, &bytes_min);
             if (APR_SUCCESS != status) {
                 exit(2);
             }
@@ -4418,7 +4509,7 @@ int main(int argc, const char * const argv[])
         }
         case DEVICE_BYTES_MAX: {
 
-            status = device_parse_int64(&ds, optarg, &bytes_max);
+            status = device_parse_uint64(&ds, optarg, &bytes_max);
             if (APR_SUCCESS != status) {
                 exit(2);
             }
@@ -4490,7 +4581,7 @@ int main(int argc, const char * const argv[])
         }
         case DEVICE_SQL_IDENTIFIER_MIN: {
 
-            status = device_parse_int64(&ds, optarg, &sqlid_min);
+            status = device_parse_uint64(&ds, optarg, &sqlid_min);
             if (APR_SUCCESS != status) {
                 exit(2);
             }
@@ -4499,7 +4590,7 @@ int main(int argc, const char * const argv[])
         }
         case DEVICE_SQL_IDENTIFIER_MAX: {
 
-            status = device_parse_int64(&ds, optarg, &sqlid_max);
+            status = device_parse_uint64(&ds, optarg, &sqlid_max);
             if (APR_SUCCESS != status) {
                 exit(2);
             }
@@ -4640,6 +4731,39 @@ int main(int argc, const char * const argv[])
             else {
                 apr_file_printf(ds.err, "argument '%s': is not 'on' or 'off'.\n",
                         apr_pescape_echo(ds.pool, optarg, 1));
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_INTEGER: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_INTEGER;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->i.min = integer_min;
+            pair->i.max = integer_max;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_INTEGER_MIN: {
+
+            status = device_parse_int64(&ds, optarg, &integer_min);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_INTEGER_MAX: {
+
+            status = device_parse_int64(&ds, optarg, &integer_max);
+            if (APR_SUCCESS != status) {
                 exit(2);
             }
 

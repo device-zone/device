@@ -46,6 +46,15 @@
 #include <sys/types.h>
 #include <pwd.h>
 #endif
+#if HAVE_LOCALE_H
+#include <locale.h>
+#endif
+#if HAVE_LANGINFO_H
+#include <langinfo.h>
+#endif
+#if HAVE_ICONV_H
+#include <iconv.h>
+#endif
 
 #define DEVICE_OPTIONAL 257
 #define DEVICE_REQUIRED 258
@@ -81,6 +90,10 @@
 #define DEVICE_INTEGER 288
 #define DEVICE_INTEGER_MIN 289
 #define DEVICE_INTEGER_MAX 290
+#define DEVICE_TEXT 291
+#define DEVICE_TEXT_MIN 292
+#define DEVICE_TEXT_MAX 293
+#define DEVICE_TEXT_FORMAT 294
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -144,6 +157,9 @@ typedef struct device_set_t {
 #define DEVICE_FILE_UMASK (0x0113)
 #define DEVICE_POLAR_DEFAULT_VAL DEVICE_IS_NO
 #define DEVICE_SWITCH_DEFAULT_VAL DEVICE_IS_OFF
+#define DEVICE_TEXT_MIN_DEFAULT 0
+#define DEVICE_TEXT_MAX_DEFAULT 255
+#define DEVICE_TEXT_FORMAT_DEFAULT "UTF-8"
 
 typedef enum device_pair_e {
     DEVICE_PAIR_INDEX,
@@ -162,6 +178,7 @@ typedef enum device_pair_e {
     DEVICE_PAIR_POLAR,
     DEVICE_PAIR_SWITCH,
     DEVICE_PAIR_INTEGER,
+    DEVICE_PAIR_TEXT,
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -234,6 +251,12 @@ typedef struct device_pair_integer_t {
     apr_int64_t max;
 } device_pair_integer_t;
 
+typedef struct device_pair_text_t {
+    const char *format;
+    apr_uint64_t min;
+    apr_uint64_t max;
+} device_pair_text_t;
+
 typedef struct device_pair_t {
     const char *key;
     const char *suffix;
@@ -252,6 +275,7 @@ typedef struct device_pair_t {
         device_pair_polars_t p;
         device_pair_switches_t sw;
         device_pair_integer_t i;
+        device_pair_text_t t;
     };
 } device_pair_t;
 
@@ -298,9 +322,9 @@ static const apr_getopt_option_t
     { "symlink-base", DEVICE_SYMLINK_BASE, 1, "  --symlink-base=path\t\tBase path containing targets for symbolic links.\n\t\t\t\tMore than one path can be specified. In the case\n\t\t\t\tof collision, the earliest match wins." },
     { "symlink-suffix", DEVICE_SYMLINK_SUFFIX, 1, "  --symlink-suffix=suffix\tLimit targets for symbolic links to this suffix." },
 #if 0
-	{ "symlink-magic", DEVICE_SYMLINK_MAGIC, 1, "  --symlink-magic=magic\tLimit targets for symbolic links to this magic file definition." },
+    { "symlink-magic", DEVICE_SYMLINK_MAGIC, 1, "  --symlink-magic=magic\tLimit targets for symbolic links to this magic file definition." },
 #endif
-	{ "symlink", DEVICE_SYMLINK, 1, "  --symlink=name\t\tParse a selection from a list of files or\n\t\t\t\tdirectories matching the symlink-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
+    { "symlink", DEVICE_SYMLINK, 1, "  --symlink=name\t\tParse a selection from a list of files or\n\t\t\t\tdirectories matching the symlink-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
     { "sql-id", DEVICE_SQL_IDENTIFIER, 1, "  --sql-id=id\t\t\tSQL identifier in regular format. Regular\n\t\t\t\tidentifiers start with a letter (a-z, but also\n\t\t\t\tletters with diacritical marks and non-Latin\n\t\t\t\tletters) or an underscore (_). Subsequent\n\t\t\t\tcharacters in an identifier can be letters,\n\t\t\t\tunderscores, or digits (0-9). The resulting value\n\t\t\t\tdoes not need to be SQL escaped before use." },
     { "sql-delimited-id", DEVICE_SQL_DELIMITED_IDENTIFIER, 1, "  --sql-delimited-id=id\t\tSQL identifier in delimited format. Delimited\n\t\t\t\tidentifiers consist of any UTF8 non-zero character.\n\t\t\t\tThe resulting value must be SQL escaped separately\n\t\t\t\tbefore use." },
     { "sql-id-minimum", DEVICE_SQL_IDENTIFIER_MIN, 1, "  --sql-id-minimum=chars\tMinimum length used by the next\n\t\t\t\tsql-id/sql-delimited-id option. Defaults to 1." },
@@ -319,6 +343,10 @@ static const apr_getopt_option_t
     { "integer-minimum", DEVICE_INTEGER_MIN, 1, "  --integer-minimum=min\t\tLower limit used by the next integer option. \"min\"\n\t\t\t\tfor down to -9,223,372,036,854,775,808." },
     { "integer-maximum", DEVICE_INTEGER_MAX, 1, "  --integer-maximum=max\t\tUpper limit used by the next integer option. \"max\"\n\t\t\t\tfor up to 9,223,372,036,854,775,807." },
     { "integer", DEVICE_INTEGER, 1, "  --integer=number\t\tParse a 64 bit integer. Use \"min\" and \"max\" for lower\n\t\t\t\tand upper limit." },
+    { "text-format", DEVICE_TEXT_FORMAT, 1, "  --text-format=format\t\tFormat used by the next text option. Defaults to UTF-8." },
+    { "text-minimum", DEVICE_TEXT_MIN, 1, "  --text-minimum=min\t\tMinimum length used by the next text option." },
+    { "text-maximum", DEVICE_TEXT_MAX, 1, "  --text-maximum=max\t\tMaximum length used by the next text option." },
+    { "text", DEVICE_TEXT, 1, "  --text=chars\t\t\tParse text, converting to given format (default UTF-8).\n\t\t\t\tInvalid text strings will be rejected." },
     { NULL }
 };
 
@@ -2696,6 +2724,97 @@ static apr_status_t device_parse_integer(device_set_t *ds, device_pair_t *pair,
     return status;
 }
 
+/*
+ * Text is a string to be converted to the defined character set.
+ */
+static apr_status_t device_parse_text(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    char *inbuf, *outbuf;
+    apr_size_t inbytesleft, outbytesleft, nchars, outlen;
+    apr_status_t status = APR_SUCCESS;
+
+    char *out;
+
+    const char *from = nl_langinfo(CODESET);
+
+    iconv_t ic = iconv_open(pair->t.format, from);
+
+    if (APR_SUCCESS != (status = errno)) {
+        apr_file_printf(ds->err, "%s: cannot convert '%s' to '%s': %pm\n",
+                device_pescape_shell(ds->pool, pair->key), from, pair->t.format,
+                &status);
+        return status;
+    }
+
+    inbuf = (char *)arg;
+    inbytesleft = strlen(arg);
+    outbytesleft = 0;
+
+    out = NULL;
+    outlen = 0;
+
+    do {
+
+        out = realloc(out, outlen + 256);
+        if (!out) {
+            iconv_close(ic);
+            return APR_ENOMEM;
+        }
+
+        outbuf = out + outlen - outbytesleft;
+        outlen += 256;
+        outbytesleft += 256;
+
+        nchars = iconv(ic, &inbuf, &inbytesleft, &outbuf, &outbytesleft);
+
+    } while (nchars == (apr_size_t)-1 && errno == E2BIG);
+
+    if (nchars == (apr_size_t) -1) {
+        status = errno;
+        if (errno == EILSEQ) {
+            apr_file_printf(ds->err, "%s: contains an invalid '%s' character: %pm\n",
+                    device_pescape_shell(ds->pool, pair->key), from, &status);
+            goto end;
+        } else if (errno == EINVAL) {
+            apr_file_printf(ds->err, "%s: ends with a truncated '%s' character: %pm\n",
+                    device_pescape_shell(ds->pool, pair->key), from, &status);
+            goto end;
+        } else {
+            apr_file_printf(ds->err, "%s: cannot convert a '%s' character: %pm\n",
+                    device_pescape_shell(ds->pool, pair->key), from, &status);
+            goto end;
+        }
+    }
+
+    outlen -= outbytesleft;
+
+    if (outlen < pair->t.min) {
+        apr_file_printf(ds->err, "%s: text is too short (%" APR_SIZE_T_FMT " converted bytes)\n",
+                device_pescape_shell(ds->pool, pair->key), outlen);
+        status = APR_ERANGE;
+        goto end;
+    }
+    else if (outlen > pair->t.max) {
+        apr_file_printf(ds->err, "%s: text is too long (%" APR_SIZE_T_FMT " converted bytes)\n",
+                device_pescape_shell(ds->pool, pair->key), outlen);
+        status = APR_ERANGE;
+        goto end;
+    }
+
+    if (option) {
+        *option = apr_pstrndup(ds->pool, out, outlen);
+    }
+
+end:
+
+    free(out);
+
+    iconv_close(ic);
+
+    return status;
+}
+
 static apr_status_t device_get(device_set_t *ds, const char *arg,
         apr_array_header_t *options, const char **option, const char **path,
         int *exact)
@@ -3302,6 +3421,9 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             case DEVICE_PAIR_INTEGER:
                 status = device_parse_integer(ds, pair, value, options, NULL);
                 break;
+            case DEVICE_PAIR_TEXT:
+                status = device_parse_text(ds, pair, value, options, NULL);
+                break;
 
             default:
                 status = APR_EINVAL;
@@ -3642,6 +3764,9 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             break;
         case DEVICE_PAIR_INTEGER:
             status = device_parse_integer(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_TEXT:
+            status = device_parse_text(ds, pair, val, options, &val);
             break;
         }
 
@@ -4334,6 +4459,10 @@ int main(int argc, const char * const argv[])
     apr_int64_t integer_min;;
     apr_int64_t integer_max;
 
+    apr_uint64_t text_min = DEVICE_TEXT_MIN_DEFAULT;
+    apr_uint64_t text_max = DEVICE_TEXT_MAX_DEFAULT;
+    const char *text_format = DEVICE_TEXT_FORMAT_DEFAULT;
+
     /* lets get APR off the ground, and make sure it terminates cleanly */
     if (APR_SUCCESS != (status = apr_app_initialize(&argc, &argv, NULL))) {
         return 1;
@@ -4354,6 +4483,8 @@ int main(int argc, const char * const argv[])
 
     device_parse_int64(&ds, "min", &integer_min);
     device_parse_int64(&ds, "max", &integer_max);
+
+    setlocale(LC_CTYPE,"");
 
     apr_getopt_init(&opt, ds.pool, argc, argv);
     while ((status = apr_getopt_long(opt, cmdline_opts, &optch, &optarg))
@@ -4786,6 +4917,46 @@ int main(int argc, const char * const argv[])
             if (APR_SUCCESS != status) {
                 exit(2);
             }
+
+            break;
+        }
+        case DEVICE_TEXT: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_TEXT;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->t.format = text_format;
+            pair->t.min = text_min;
+            pair->t.max = text_max;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_TEXT_MIN: {
+
+            status = device_parse_uint64(&ds, optarg, &text_min);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_TEXT_MAX: {
+
+            status = device_parse_uint64(&ds, optarg, &text_max);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_TEXT_FORMAT: {
+
+            text_format = optarg;
 
             break;
         }

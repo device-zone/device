@@ -12,8 +12,14 @@
 /* Define to 1 if you have the <histedit.h> header file. */
 #undef HAVE_HISTEDIT_H
 
+/* Define to 1 if you have the <iconv.h> header file. */
+#undef HAVE_ICONV_H
+
 /* Define to 1 if you have the <inttypes.h> header file. */
 #undef HAVE_INTTYPES_H
+
+/* Define to 1 if you have the <langinfo.h> header file. */
+#undef HAVE_LANGINFO_H
 
 /* Define to 1 if you have the `edit' library (-ledit). */
 #undef HAVE_LIBEDIT
@@ -29,6 +35,9 @@
 
 /* Have the linenoise header files */
 #undef HAVE_LINENOISE_H
+
+/* Define to 1 if you have the <locale.h> header file. */
+#undef HAVE_LOCALE_H
 
 /* Define to 1 if your system has a GNU libc compatible `malloc' function, and
    to 0 otherwise. */

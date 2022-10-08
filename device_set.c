@@ -62,24 +62,25 @@
 #define DEVICE_SYMLINK 269
 #define DEVICE_SYMLINK_BASE 270
 #define DEVICE_SYMLINK_SUFFIX 271
-#define DEVICE_SQL_IDENTIFIER 272
-#define DEVICE_SQL_DELIMITED_IDENTIFIER 273
-#define DEVICE_SQL_IDENTIFIER_MIN 274
-#define DEVICE_SQL_IDENTIFIER_MAX 275
-#define DEVICE_USER_GROUP 276
-#define DEVICE_USER 277
-#define DEVICE_DISTINGUISHED_NAME 278
-#define DEVICE_RELATION_BASE 279
-#define DEVICE_RELATION_NAME 280
-#define DEVICE_RELATION_SUFFIX 281
-#define DEVICE_RELATION 282
-#define DEVICE_POLAR 283
-#define DEVICE_POLAR_DEFAULT 284
-#define DEVICE_SWITCH 285
-#define DEVICE_SWITCH_DEFAULT 286
-#define DEVICE_INTEGER 287
-#define DEVICE_INTEGER_MIN 288
-#define DEVICE_INTEGER_MAX 289
+#define DEVICE_SYMLINK_MAGIC 272
+#define DEVICE_SQL_IDENTIFIER 273
+#define DEVICE_SQL_DELIMITED_IDENTIFIER 274
+#define DEVICE_SQL_IDENTIFIER_MIN 275
+#define DEVICE_SQL_IDENTIFIER_MAX 276
+#define DEVICE_USER_GROUP 277
+#define DEVICE_USER 278
+#define DEVICE_DISTINGUISHED_NAME 279
+#define DEVICE_RELATION_BASE 280
+#define DEVICE_RELATION_NAME 281
+#define DEVICE_RELATION_SUFFIX 282
+#define DEVICE_RELATION 283
+#define DEVICE_POLAR 284
+#define DEVICE_POLAR_DEFAULT 285
+#define DEVICE_SWITCH 286
+#define DEVICE_SWITCH_DEFAULT 287
+#define DEVICE_INTEGER 288
+#define DEVICE_INTEGER_MIN 289
+#define DEVICE_INTEGER_MAX 290
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -296,7 +297,10 @@ static const apr_getopt_option_t
     { "bytes", DEVICE_BYTES, 1, "  --bytes=name\t\t\tParse a positive integer containing bytes.\n\t\t\t\tOptional modifiers like B, kB, KiB, MB, MiB,\n\t\t\t\tGB, GiB, TB, TiB, PB, PiB, EB, EiB are accepted,\n\t\t\t\tand the given string is expanded into a byte\n\t\t\t\tvalue. Modifiers outside of the specified byte\n\t\t\t\trange are ignored." },
     { "symlink-base", DEVICE_SYMLINK_BASE, 1, "  --symlink-base=path\t\tBase path containing targets for symbolic links.\n\t\t\t\tMore than one path can be specified. In the case\n\t\t\t\tof collision, the earliest match wins." },
     { "symlink-suffix", DEVICE_SYMLINK_SUFFIX, 1, "  --symlink-suffix=suffix\tLimit targets for symbolic links to this suffix." },
-    { "symlink", DEVICE_SYMLINK, 1, "  --symlink=name\t\tParse a selection from a list of files or\n\t\t\t\tdirectories matching the symlink-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
+#if 0
+	{ "symlink-magic", DEVICE_SYMLINK_MAGIC, 1, "  --symlink-magic=magic\tLimit targets for symbolic links to this magic file definition." },
+#endif
+	{ "symlink", DEVICE_SYMLINK, 1, "  --symlink=name\t\tParse a selection from a list of files or\n\t\t\t\tdirectories matching the symlink-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
     { "sql-id", DEVICE_SQL_IDENTIFIER, 1, "  --sql-id=id\t\t\tSQL identifier in regular format. Regular\n\t\t\t\tidentifiers start with a letter (a-z, but also\n\t\t\t\tletters with diacritical marks and non-Latin\n\t\t\t\tletters) or an underscore (_). Subsequent\n\t\t\t\tcharacters in an identifier can be letters,\n\t\t\t\tunderscores, or digits (0-9). The resulting value\n\t\t\t\tdoes not need to be SQL escaped before use." },
     { "sql-delimited-id", DEVICE_SQL_DELIMITED_IDENTIFIER, 1, "  --sql-delimited-id=id\t\tSQL identifier in delimited format. Delimited\n\t\t\t\tidentifiers consist of any UTF8 non-zero character.\n\t\t\t\tThe resulting value must be SQL escaped separately\n\t\t\t\tbefore use." },
     { "sql-id-minimum", DEVICE_SQL_IDENTIFIER_MIN, 1, "  --sql-id-minimum=chars\tMinimum length used by the next\n\t\t\t\tsql-id/sql-delimited-id option. Defaults to 1." },

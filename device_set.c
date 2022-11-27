@@ -223,10 +223,16 @@ typedef struct device_pair_bytes_t {
 
 typedef struct device_pair_symlinks_t {
     apr_array_header_t *bases;
+    const char *symlink_suffix;
+    int symlink_suffix_len;
 } device_pair_symlinks_t;
 
 typedef struct device_pair_relations_t {
     apr_array_header_t *bases;
+    const char *relation_name;
+    int relation_name_len;
+    const char *relation_suffix;
+    int relation_suffix_len;
 } device_pair_relations_t;
 
 typedef struct device_pair_sqlid_t {
@@ -285,6 +291,7 @@ typedef struct device_file_t {
     const char *dest;
     const char *backup;
     const char *val;
+    const char *link;
     apr_int64_t order;
     device_index_e index;
     apr_filetype_e type;
@@ -1320,7 +1327,8 @@ static apr_status_t device_parse_bytes(device_set_t *ds, device_pair_t *pair,
  * a target path.
  */
 static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
-        const char *arg, apr_array_header_t *options, const char **option)
+        const char *arg, apr_array_header_t *options, const char **option,
+        const char **link)
 {
     const char *none = NULL;
     apr_status_t status;
@@ -1380,15 +1388,15 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
                 }
 
                 /* suffixes? */
-                if (ds->symlink_suffix) {
+                if (pair->s.symlink_suffix) {
                     int len = strlen(dirent.name);
-                    if (len < ds->symlink_suffix_len
-                            || strcmp(ds->symlink_suffix,
-                                    dirent.name + len - ds->symlink_suffix_len)) {
+                    if (len < pair->s.symlink_suffix_len
+                            || strcmp(pair->s.symlink_suffix,
+                                    dirent.name + len - pair->s.symlink_suffix_len)) {
                         continue;
                     }
                     name = apr_pstrndup(ds->pool, dirent.name,
-                            len - ds->symlink_suffix_len);
+                            len - pair->s.symlink_suffix_len);
                 }
                 else {
                     name = apr_pstrdup(ds->pool, dirent.name);
@@ -1426,6 +1434,7 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
 
                         if (none) {
                             option[0] = NULL;
+                            link[0] = NULL;
                         }
                         else if (APR_SUCCESS
                                 != (status = apr_filepath_merge(&target, base,
@@ -1435,7 +1444,8 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
                                     &status);
                         }
                         else {
-                            option[0] = target;
+                            option[0] = apr_pstrdup(ds->pool, name);
+                            link[0] = target;
                         }
 
                     }
@@ -2342,7 +2352,8 @@ static apr_status_t device_parse_distinguished_name(device_set_t *ds, device_pai
  * a target path.
  */
 static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
-        const char *arg, apr_array_header_t *options, const char **option)
+        const char *arg, apr_array_header_t *options, const char **option,
+        const char **link)
 {
     const char *none = NULL;
     apr_status_t status;
@@ -2358,7 +2369,7 @@ static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
         option[0] = NULL; /* until further notice */
     }
 
-    if (!ds->relation_name) {
+    if (!pair->r.relation_name) {
         apr_file_printf(ds->err, "no relation name specified for '%s'\n", pair->key);
         return APR_EGENERAL;
     }
@@ -2422,7 +2433,7 @@ static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
                     continue;
                 }
 
-                keyname = apr_pstrcat(pool, ds->relation_name, ds->relation_suffix, NULL);
+                keyname = apr_pstrcat(pool, pair->r.relation_name, pair->r.relation_suffix, NULL);
                 if (APR_SUCCESS
                         != (status = apr_filepath_merge(&keypath, base, dirent.name,
                                 APR_FILEPATH_NATIVE, pool))) {
@@ -2508,9 +2519,11 @@ static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
 
                     if (none) {
                         option[0] = NULL;
+                        link[0] = NULL;
                     }
                     else {
-                        option[0] = apr_pstrdup(ds->pool, keypath);
+                        option[0] = apr_pstrdup(ds->pool, name);
+                        link[0] = apr_pstrdup(ds->pool, keypath);
                     }
 
                 }
@@ -2541,7 +2554,6 @@ done:
         if (option) {
             if (options->nelts == 1) {
                 /* all ok */
-                status = APR_SUCCESS;
             }
             else {
                 device_error_possibles(ds, pair->key, possibles);
@@ -2550,6 +2562,7 @@ done:
             }
         }
 
+        status = APR_SUCCESS;
     }
     else {
         apr_file_printf(ds->err, "cannot read option '%s': %pm\n", pair->key,
@@ -2868,64 +2881,194 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
             apr_pool_t *pool;
             char *name;
             apr_file_t *in;
+            apr_finfo_t finfo;
             const char *keyname;
+            const char *relname;
             char *keypath;
+            char *relpath;
             apr_off_t end = 0, start = 0;
 
             apr_pool_create(&pool, ds->pool);
 
-            keyname = apr_pstrcat(pool, pair->key, pair->suffix, NULL);
-            if (APR_SUCCESS
-                    != (status = apr_filepath_merge(&keypath, dirent.name,
-                            keyname, APR_FILEPATH_NOTABSOLUTE, pool))) {
-                apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
-                        &status);
-            }
+            switch (pair->type) {
 
-            /* open the key */
-            else if (APR_SUCCESS
-                    != (status = apr_file_open(&in, keypath, APR_FOPEN_READ,
-                            APR_FPROT_OS_DEFAULT, pool))) {
-                apr_file_printf(ds->err, "cannot open option set '%s': %pm\n", pair->key,
-                        &status);
-            }
+            case DEVICE_PAIR_PORT:
+            case DEVICE_PAIR_UNPRIVILEGED_PORT:
+            case DEVICE_PAIR_HOSTNAME:
+            case DEVICE_PAIR_FQDN:
+            case DEVICE_PAIR_SELECT:
+            case DEVICE_PAIR_BYTES:
+            case DEVICE_PAIR_SQL_IDENTIFIER:
+            case DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER:
+            case DEVICE_PAIR_USER:
+            case DEVICE_PAIR_DISTINGUISHED_NAME:
+            case DEVICE_PAIR_POLAR:
+            case DEVICE_PAIR_SWITCH:
+            case DEVICE_PAIR_INTEGER:
+            case DEVICE_PAIR_TEXT:
 
-            /* how long is the key? */
-            else if (APR_SUCCESS
-                    != (status = apr_file_seek(in, APR_END, &end))) {
-                apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
-                        &status);
-            }
-
-            /* back to the beginning */
-            else if (APR_SUCCESS
-                    != (status = apr_file_seek(in, APR_SET, &start))) {
-                apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
-                        &status);
-            }
-
-            else {
-                int size = end + 1;
-                name = apr_palloc(pool, size);
-
-                status = apr_file_gets(name, size, in);
-
-                if (APR_EOF == status) {
-                    status = APR_SUCCESS;
-                }
-                if (APR_SUCCESS == status) {
-                    /* short circuit, all good */
-                    name = trim(name);
-                }
-                else {
-                    apr_file_printf(ds->err, "cannot read option set '%s': %pm\n", pair->key,
+                keyname = apr_pstrcat(pool, pair->key, pair->suffix, NULL);
+                if (APR_SUCCESS
+                        != (status = apr_filepath_merge(&keypath, dirent.name,
+                                keyname, APR_FILEPATH_NOTABSOLUTE, pool))) {
+                    apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
                             &status);
                 }
+
+                /* open the key */
+                else if (APR_SUCCESS
+                        != (status = apr_file_open(&in, keypath, APR_FOPEN_READ,
+                                APR_FPROT_OS_DEFAULT, pool))) {
+                    apr_file_printf(ds->err, "cannot open option set '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                /* how long is the key? */
+                else if (APR_SUCCESS
+                        != (status = apr_file_seek(in, APR_END, &end))) {
+                    apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                /* back to the beginning */
+                else if (APR_SUCCESS
+                        != (status = apr_file_seek(in, APR_SET, &start))) {
+                    apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                else {
+                    int size = end + 1;
+                    name = apr_palloc(pool, size);
+
+                    status = apr_file_gets(name, size, in);
+
+                    if (APR_EOF == status) {
+                        status = APR_SUCCESS;
+                    }
+                    if (APR_SUCCESS == status) {
+                        /* short circuit, all good */
+                        name = trim(name);
+                    }
+                    else {
+                        apr_file_printf(ds->err, "cannot read option set '%s': %pm\n", pair->key,
+                                &status);
+                    }
+                }
+
+                break;
+
+            case DEVICE_PAIR_INDEX:
+                /* support me */
+                apr_pool_destroy(pool);
+                continue;
+            case DEVICE_PAIR_SYMLINK:
+
+                keyname = apr_pstrcat(pool, pair->key, pair->suffix, NULL);
+                if (APR_SUCCESS
+                        != (status = apr_filepath_merge(&keypath, dirent.name,
+                                keyname, APR_FILEPATH_NOTABSOLUTE, pool))) {
+                    apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                /* stat the key */
+                else if (APR_SUCCESS
+                        != (status = apr_stat(&finfo, keypath, APR_FINFO_LINK | APR_FINFO_TYPE | APR_FINFO_NAME,
+                                pool))) {
+                    apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                else {
+
+                    int size = strlen(finfo.name);
+
+                    if (size >= pair->s.symlink_suffix_len) {
+                        name = apr_pstrndup(ds->pool, finfo.name, size - pair->s.symlink_suffix_len);
+                    }
+                    else {
+                        apr_file_printf(ds->err, "option set '%s' does not have suffix: %s\n", pair->key,
+                                pair->s.symlink_suffix);
+                        status = APR_EGENERAL;
+                    }
+
+                }
+
+                break;
+
+            case DEVICE_PAIR_RELATION:
+
+                keyname = apr_pstrcat(pool, pair->key, pair->suffix, NULL);
+                relname = apr_pstrcat(pool, pair->r.relation_name,
+                        pair->r.relation_suffix, NULL);
+                if (APR_SUCCESS
+                        != (status = apr_filepath_merge(&keypath, dirent.name,
+                                keyname, APR_FILEPATH_NOTABSOLUTE, pool))) {
+                    apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                /* find relation */
+                if (APR_SUCCESS
+                        != (status = apr_filepath_merge(&relpath, keypath,
+                                relname, APR_FILEPATH_NOTABSOLUTE, pool))) {
+                    apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                /* open the key */
+                else if (APR_SUCCESS
+                        != (status = apr_file_open(&in, relpath, APR_FOPEN_READ,
+                                APR_FPROT_OS_DEFAULT, pool))) {
+                    apr_file_printf(ds->err, "cannot open option set '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                /* how long is the key? */
+                else if (APR_SUCCESS
+                        != (status = apr_file_seek(in, APR_END, &end))) {
+                    apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                /* back to the beginning */
+                else if (APR_SUCCESS
+                        != (status = apr_file_seek(in, APR_SET, &start))) {
+                    apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                            &status);
+                }
+
+                else {
+                    int size = end + 1;
+                    name = apr_palloc(pool, size);
+
+                    status = apr_file_gets(name, size, in);
+
+                    if (APR_EOF == status) {
+                        status = APR_SUCCESS;
+                    }
+                    if (APR_SUCCESS == status) {
+                        /* short circuit, all good */
+                        name = trim(name);
+                    }
+                    else {
+                        apr_file_printf(ds->err, "cannot read option set '%s': %pm\n", pair->key,
+                                &status);
+                    }
+                }
+
+                break;
+
+            default:
+                /* support me */
+                apr_pool_destroy(pool);
+                continue;
             }
 
             if (status != APR_SUCCESS) {
                 apr_pool_destroy(pool);
-                break;
+                continue;
             }
 
             int ex = (0 == strcmp(arg, name));
@@ -3168,7 +3311,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
             file->template = apr_psprintf(ds->pool, "%s;%" APR_PID_T_FMT, file->dest, pid);
 
             errno = 0;
-            symlink(file->val, file->template);
+            symlink(file->link, file->template);
             if (APR_SUCCESS != (status = errno)) {
                 apr_file_printf(ds->err, "cannot link '%s': %pm\n", file->key, &status);
                 break;
@@ -3394,7 +3537,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
                 status = device_parse_bytes(ds, pair, value, options, NULL);
                 break;
             case DEVICE_PAIR_SYMLINK:
-                status = device_parse_symlink(ds, pair, value, options, NULL);
+                status = device_parse_symlink(ds, pair, value, options, NULL, NULL);
                 break;
             case DEVICE_PAIR_SQL_IDENTIFIER:
                 status = device_parse_sql_identifier(ds, pair, value, NULL);
@@ -3410,7 +3553,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
                 status = device_parse_distinguished_name(ds, pair, value, options, NULL);
                 break;
             case DEVICE_PAIR_RELATION:
-                status = device_parse_relation(ds, pair, value, options, NULL);
+                status = device_parse_relation(ds, pair, value, options, NULL, NULL);
                 break;
             case DEVICE_PAIR_POLAR:
                 status = device_parse_polar(ds, pair, value, options, NULL);
@@ -3713,6 +3856,8 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
 
         apr_filetype_e type = APR_REG;
 
+        const char *link = NULL;
+
         switch (pair->type) {
         case DEVICE_PAIR_INDEX:
             status = device_parse_index(ds, pair, val, &val, files);
@@ -3736,7 +3881,7 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             status = device_parse_bytes(ds, pair, val, options, &val);
             break;
         case DEVICE_PAIR_SYMLINK:
-            status = device_parse_symlink(ds, pair, val, options, &val);
+            status = device_parse_symlink(ds, pair, val, options, &val, &link);
             type = APR_LNK;
             break;
         case DEVICE_PAIR_SQL_IDENTIFIER:
@@ -3753,7 +3898,7 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             status = device_parse_distinguished_name(ds, pair, val, options, &val);
             break;
         case DEVICE_PAIR_RELATION:
-            status = device_parse_relation(ds, pair, val, options, &val);
+            status = device_parse_relation(ds, pair, val, options, &val, &link);
             type = APR_LNK;
             break;
         case DEVICE_PAIR_POLAR:
@@ -3777,6 +3922,7 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
         file->template = apr_pstrcat(ds->pool, file->dest, ".XXXXXX", NULL);
         file->key = key;
         file->val = val;
+        file->link = link;
         file->index = pair->index;
 
         if (APR_SUCCESS != status) {
@@ -4365,6 +4511,7 @@ static apr_status_t device_reindex(device_set_t *ds, const char **args)
                         old->dest = apr_pstrdup(ds->pool, dirent.name);
                         old->key = pair->key;
                         old->val = NULL; /* delete the index */
+                        old->link = NULL;
                         old->index = pair->index;
 
                     }
@@ -4398,11 +4545,11 @@ static apr_status_t device_reindex(device_set_t *ds, const char **args)
 
             for (i = 0, nelts = tfiles->nelts; i < nelts; i++) {
 
-                const char *val;
+                const char *slink;
 
                 device_file_t *file = &APR_ARRAY_IDX(tfiles, i, device_file_t);
 
-                val = apr_psprintf(ds->pool, "%d", i);
+                slink = apr_psprintf(ds->pool, "%d", i);
 
                 if (file->index == DEVICE_IS_INDEXED) {
 
@@ -4413,13 +4560,13 @@ static apr_status_t device_reindex(device_set_t *ds, const char **args)
                     link->type = APR_LNK;
                     link->order = i;
 
-                    link->dest = val;
+                    link->dest = slink;
                     link->key = pair->key;
-                    link->val = file->val;
+                    link->link = file->link;
                     link->index = DEVICE_IS_NORMAL;
                 }
 
-                file->val = val;
+                file->link = slink;
 
             }
 
@@ -4676,6 +4823,8 @@ int main(int argc, const char * const argv[])
             pair->suffix = ds.symlink_suffix ? ds.symlink_suffix  : DEVICE_NONE_SUFFIX;
             pair->optional = optional;
             pair->s.bases = ds.symlink_bases;
+            pair->s.symlink_suffix = ds.symlink_suffix;
+            pair->s.symlink_suffix_len = ds.symlink_suffix_len;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
@@ -4798,6 +4947,10 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_DIR_SUFFIX;
             pair->optional = optional;
             pair->r.bases = ds.relation_bases;
+            pair->r.relation_name = ds.relation_name;
+            pair->r.relation_name_len = ds.relation_name_len;
+            pair->r.relation_suffix = ds.relation_suffix;
+            pair->r.relation_suffix_len = ds.relation_suffix_len;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 

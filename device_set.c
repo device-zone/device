@@ -1109,7 +1109,7 @@ static apr_status_t device_parse_bytes(device_set_t *ds, device_pair_t *pair,
         const char *arg, apr_array_header_t *options, const char **option)
 {
     char *end;
-    char *result;
+    char *result = NULL;
     apr_int64_t bytes;
 
     apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
@@ -2401,7 +2401,7 @@ static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
 
         do {
             const char **possible;
-            char *name;
+            char *name = NULL;
             char *keypath;
 
             int exact;
@@ -2881,7 +2881,7 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
         case APR_DIR: {
 
             apr_pool_t *pool;
-            char *name;
+            char *name = NULL;
             apr_file_t *in;
             apr_finfo_t finfo;
             const char *keyname;
@@ -3152,7 +3152,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
     apr_file_t *out;
 
     char *pwd;
-    const char *key = NULL, *keypath = NULL, *keyval = NULL;
+    const char *keypath = NULL, *keyval = NULL;
     apr_status_t status = APR_SUCCESS;
     int i;
 
@@ -3212,8 +3212,8 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
         }
         else {
-            apr_file_printf(ds->err, "option '%s' does not exist\n", ds->key);
-            return status;
+            apr_file_printf(ds->err, "option is unset\n");
+            return APR_EGENERAL;
         }
 
     }
@@ -3365,13 +3365,13 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
             /* revert to present working directory */
             status = apr_filepath_set(pwd, ds->pool);
             if (APR_SUCCESS != status) {
-                apr_file_printf(ds->err, "cannot revert '%s': %pm\n", key, &status);
+                apr_file_printf(ds->err, "cannot revert '%s': %pm\n", ds->key, &status);
                 return status;
             }
 
             if (ds->mode == DEVICE_ADD) {
                 if (APR_SUCCESS != (status = apr_dir_remove(keypath, ds->pool))) {
-                    apr_file_printf(ds->err, "cannot remove '%s': %pm\n", key, &status);
+                    apr_file_printf(ds->err, "cannot remove '%s': %pm\n", ds->key, &status);
                     return status;
                 }
             }
@@ -3657,7 +3657,7 @@ static apr_status_t device_default_index(device_set_t *ds, device_pair_t *pair,
         case APR_DIR: {
 
             apr_pool_t *pool;
-            char *val;
+            char *val = NULL;
             apr_file_t *in;
             const char *indexname;
             char *indexpath;
@@ -3847,7 +3847,7 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
     device_file_t *file;
     device_pair_t *pair;
 
-    apr_status_t status;
+    apr_status_t status = APR_SUCCESS;
 
     /* look up the parameter */
     pair = apr_hash_get(ds->pairs, key, APR_HASH_KEY_STRING);
@@ -4406,7 +4406,7 @@ static apr_status_t device_reindex(device_set_t *ds, const char **args)
 
                     apr_pool_create(&pool, ds->pool);
 
-                    char *val;
+                    char *val = NULL;
                     apr_file_t *in;
                     const char *indexname;
                     char *indexpath;

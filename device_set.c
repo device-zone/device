@@ -574,7 +574,7 @@ static apr_status_t device_parse_index(device_set_t *ds, device_pair_t *pair,
         case APR_DIR: {
 
             apr_pool_t *pool;
-            char *val;
+            char *val = NULL;
             apr_file_t *in;
             const char *indexname;
             char *indexpath, *path, *linkpath;
@@ -2345,6 +2345,8 @@ static apr_status_t device_parse_distinguished_name(device_set_t *ds, device_pai
 
     }
 
+    /* we should never reach here */
+    return APR_EGENERAL;
 }
 
 /**

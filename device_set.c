@@ -3313,8 +3313,7 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
             file->template = apr_psprintf(ds->pool, "%s;%" APR_PID_T_FMT, file->dest, pid);
 
             errno = 0;
-            symlink(file->link, file->template);
-            if (APR_SUCCESS != (status = errno)) {
+            if (symlink(file->link, file->template) && APR_SUCCESS != (status = errno)) {
                 apr_file_printf(ds->err, "cannot link '%s': %pm\n", file->key, &status);
                 break;
             }
@@ -3421,8 +3420,10 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
         else if (keypath && keyval) {
             apr_file_remove(keyval, ds->pool);
-            symlink(keypath, keyval);
-        }
+            if (symlink(keypath, keyval)) {
+                /* silently ignore any errors */
+	    }
+	}
 
         return APR_SUCCESS;
     }

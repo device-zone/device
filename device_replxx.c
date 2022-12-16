@@ -266,7 +266,7 @@ static void device_colour_hook(char const *context, ReplxxColor *colours, int si
         /* colourise the error */
         for (buffer = context, i = 0; *buffer && i < size; buffer += utf8str_codepoint_len(buffer, 1), i++) {
             if (context == error) {
-                colours[i] = REPLXX_COLOR_ERROR;
+                colours[i] = REPLXX_COLOR_RED;
             }
         }
 

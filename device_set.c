@@ -94,6 +94,10 @@
 #define DEVICE_TEXT_MIN 292
 #define DEVICE_TEXT_MAX 293
 #define DEVICE_TEXT_FORMAT 294
+#define DEVICE_HEX 295
+#define DEVICE_HEX_MIN 296
+#define DEVICE_HEX_MAX 297
+#define DEVICE_HEX_CASE 298
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -157,6 +161,7 @@ typedef struct device_set_t {
 #define DEVICE_FILE_UMASK (0x0113)
 #define DEVICE_POLAR_DEFAULT_VAL DEVICE_IS_NO
 #define DEVICE_SWITCH_DEFAULT_VAL DEVICE_IS_OFF
+#define DEVICE_HEX_CASE_VAL DEVICE_IS_LOWER
 #define DEVICE_TEXT_MIN_DEFAULT 0
 #define DEVICE_TEXT_MAX_DEFAULT 255
 #define DEVICE_TEXT_FORMAT_DEFAULT "UTF-8"
@@ -179,6 +184,7 @@ typedef enum device_pair_e {
     DEVICE_PAIR_SWITCH,
     DEVICE_PAIR_INTEGER,
     DEVICE_PAIR_TEXT,
+    DEVICE_PAIR_HEX,
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -211,6 +217,11 @@ typedef enum device_set_e {
     DEVICE_IS_SET,
     DEVICE_IS_DEFAULT
 } device_set_e;
+
+typedef enum device_case_e {
+    DEVICE_IS_LOWER,
+    DEVICE_IS_UPPER
+} device_case_e;
 
 typedef struct device_pair_selects_t {
     apr_array_header_t *bases;
@@ -257,6 +268,12 @@ typedef struct device_pair_integer_t {
     apr_int64_t max;
 } device_pair_integer_t;
 
+typedef struct device_pair_hex_t {
+    apr_int64_t min;
+    apr_int64_t max;
+    device_case_e cs;
+} device_pair_hex_t;
+
 typedef struct device_pair_text_t {
     const char *format;
     apr_uint64_t min;
@@ -282,6 +299,7 @@ typedef struct device_pair_t {
         device_pair_switches_t sw;
         device_pair_integer_t i;
         device_pair_text_t t;
+        device_pair_hex_t h;
     };
 } device_pair_t;
 
@@ -350,6 +368,10 @@ static const apr_getopt_option_t
     { "integer-minimum", DEVICE_INTEGER_MIN, 1, "  --integer-minimum=min\t\tLower limit used by the next integer option. \"min\"\n\t\t\t\tfor down to -9,223,372,036,854,775,808." },
     { "integer-maximum", DEVICE_INTEGER_MAX, 1, "  --integer-maximum=max\t\tUpper limit used by the next integer option. \"max\"\n\t\t\t\tfor up to 9,223,372,036,854,775,807." },
     { "integer", DEVICE_INTEGER, 1, "  --integer=number\t\tParse a 64 bit integer. Use \"min\" and \"max\" for lower\n\t\t\t\tand upper limit." },
+    { "hex-minimum", DEVICE_HEX_MIN, 1, "  --hex-minimum=min\t\tLower limit used by the next hex option. \"min\"\n\t\t\t\tfor down to 0x0." },
+    { "hex-maximum", DEVICE_HEX_MAX, 1, "  --hex-maximum=max\t\tUpper limit used by the next hex option. \"max\"\n\t\t\t\tfor up to 0xffffffffffffffff." },
+    { "hex-case", DEVICE_HEX_CASE, 1, "  --hex-case=upper|lower\tCase used by the next hex option. \"lower\" for\n\t\t\t\tlowercase, \"upper\" for uppercase. Defaults to \"lower\"." },
+    { "hex", DEVICE_HEX, 1, "  --hex=number\t\t\tParse an unsigned 64 bit hex number. Use \"min\" and\n\t\t\t\t\"max\" for lower and upper limit." },
     { "text-format", DEVICE_TEXT_FORMAT, 1, "  --text-format=format\t\tFormat used by the next text option. Defaults to UTF-8." },
     { "text-minimum", DEVICE_TEXT_MIN, 1, "  --text-minimum=min\t\tMinimum length used by the next text option." },
     { "text-maximum", DEVICE_TEXT_MAX, 1, "  --text-maximum=max\t\tMaximum length used by the next text option." },
@@ -496,6 +518,103 @@ static char *trim(char *buffer) {
     *end = 0;
 
     return start;
+}
+
+apr_uint64_t device_strtoui64(const char *nptr, char **endptr, int base)
+{
+    const char *s;
+    apr_uint64_t acc;
+    apr_uint64_t val;
+    int any;
+    char c;
+
+    errno = 0;
+    /*
+     * Skip white space and pick up leading +/- sign if any.
+     * If base is 0, allow 0x for hex and 0 for octal, else
+     * assume decimal; if base is already 16, allow 0x.
+     */
+    s = nptr;
+    do {
+        c = *s++;
+    } while (apr_isspace(c));
+    if ((base == 0 || base == 16) &&
+        c == '0' && (*s == 'x' || *s == 'X')) {
+            c = s[1];
+            s += 2;
+            base = 16;
+    }
+    if (base == 0)
+        base = c == '0' ? 8 : 10;
+    acc = any = 0;
+    if (base < 2 || base > 36) {
+        errno = EINVAL;
+        if (endptr != NULL)
+            *endptr = (char *)(any ? s - 1 : nptr);
+        return acc;
+    }
+
+    /* The classic bsd implementation requires div/mod operators
+     * to compute a cutoff.  Benchmarking proves that is very, very
+     * evil to some 32 bit processors.  Instead, look for underflow
+     * in both the mult and add/sub operation.  Unlike the bsd impl,
+     * we also work strictly in a signed int64 word as we haven't
+     * implemented the unsigned type in win32.
+     *
+     * Set 'any' if any `digits' consumed; make it negative to indicate
+     * overflow.
+     */
+    val = 0;
+    for ( ; ; c = *s++) {
+        if (c >= '0' && c <= '9')
+            c -= '0';
+#if (('Z' - 'A') == 25)
+        else if (c >= 'A' && c <= 'Z')
+            c -= 'A' - 10;
+        else if (c >= 'a' && c <= 'z')
+            c -= 'a' - 10;
+#elif APR_CHARSET_EBCDIC
+        else if (c >= 'A' && c <= 'I')
+            c -= 'A' - 10;
+        else if (c >= 'J' && c <= 'R')
+            c -= 'J' - 19;
+        else if (c >= 'S' && c <= 'Z')
+            c -= 'S' - 28;
+        else if (c >= 'a' && c <= 'i')
+            c -= 'a' - 10;
+        else if (c >= 'j' && c <= 'r')
+            c -= 'j' - 19;
+        else if (c >= 's' && c <= 'z')
+            c -= 'z' - 28;
+#else
+#error "CANNOT COMPILE device_strtoui64(), only ASCII and EBCDIC supported"
+#endif
+        else
+            break;
+        if (c >= base)
+            break;
+        val *= base;
+        if ( (any < 0)  /* already noted an over/under flow - short circuit */
+           || (val < acc || (val += c) < acc)) {       /* overflow */
+            any = -1;   /* once noted, over/underflows never go away */
+#ifdef APR_STRTOI64_OVERFLOW_IS_BAD_CHAR
+            break;
+#endif
+        } else {
+            acc = val;
+            any = 1;
+        }
+    }
+
+    if (any < 0) {
+        acc = UINT64_MAX;
+        errno = ERANGE;
+    } else if (!any) {
+        errno = EINVAL;
+    }
+    if (endptr != NULL)
+        *endptr = (char *)(any ? s - 1 : nptr);
+    return (acc);
 }
 
 static int files_asc(const void *a, const void *b)
@@ -1576,6 +1695,43 @@ static apr_status_t device_parse_int64(device_set_t *ds, const char *arg,
     }
 
     *result = bytes;
+
+    return APR_SUCCESS;
+}
+
+/*
+ * Parse a signed hex integer.
+ */
+static apr_status_t device_parse_hex64(device_set_t *ds, const char *arg,
+        apr_uint64_t *result)
+{
+    char *end;
+    apr_uint64_t hex;
+
+    if (!arg || !arg[0]) {
+        apr_file_printf(ds->err, "number is empty.\n");
+        return APR_INCOMPLETE;
+    }
+
+    if (!strcmp(arg, "min")) {
+        hex = 0;
+    }
+    else if (!strcmp(arg, "max")) {
+        hex = APR_UINT64_MAX;
+    }
+    else {
+
+        hex = device_strtoui64(arg, &end, 16);
+
+        if (end[0]) {
+            apr_file_printf(ds->err, "number '%s' is not a hex number.\n",
+                    apr_pescape_echo(ds->pool, arg, 1));
+            return APR_EINVAL;
+        }
+
+    }
+
+    *result = hex;
 
     return APR_SUCCESS;
 }
@@ -2740,6 +2896,51 @@ static apr_status_t device_parse_integer(device_set_t *ds, device_pair_t *pair,
 }
 
 /*
+ * Hex is a signed 64 bit base 16 whole number.
+ */
+static apr_status_t device_parse_hex(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    apr_uint64_t result;
+
+    apr_status_t status = device_parse_hex64(ds, arg, &result);
+
+    if (APR_SUCCESS == status) {
+
+        if (!strcmp(arg, "min")) {
+            result = pair->h.min;
+        }
+        else if (!strcmp(arg, "max")) {
+            result = pair->h.max;
+        }
+
+        if (result < pair->h.min || result > pair->h.max) {
+            apr_file_printf(ds->err, "%s: must be between %"
+                APR_UINT64_T_HEX_FMT " and %" APR_UINT64_T_HEX_FMT ".\n",
+                apr_pescape_echo(ds->pool, arg, 1),
+                    pair->i.min, pair->i.max);
+            return APR_ERANGE;
+        }
+
+        if (option) {
+
+            char fmt[16] = "%" APR_UINT64_T_HEX_FMT;
+
+            if (pair->h.cs == DEVICE_IS_UPPER) {
+                char *x = strchr(fmt, 'x');
+                if (x) {
+                    *x = 'X';
+                }
+            }
+
+            option[0] = apr_psprintf(ds->pool, fmt, result);
+        }
+    }
+
+    return status;
+}
+
+/*
  * Text is a string to be converted to the defined character set.
  */
 static apr_status_t device_parse_text(device_set_t *ds, device_pair_t *pair,
@@ -3567,6 +3768,9 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             case DEVICE_PAIR_INTEGER:
                 status = device_parse_integer(ds, pair, value, options, NULL);
                 break;
+            case DEVICE_PAIR_HEX:
+                status = device_parse_hex(ds, pair, value, options, NULL);
+                break;
             case DEVICE_PAIR_TEXT:
                 status = device_parse_text(ds, pair, value, options, NULL);
                 break;
@@ -3912,6 +4116,9 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             break;
         case DEVICE_PAIR_INTEGER:
             status = device_parse_integer(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_HEX:
+            status = device_parse_hex(ds, pair, val, options, &val);
             break;
         case DEVICE_PAIR_TEXT:
             status = device_parse_text(ds, pair, val, options, &val);
@@ -4606,8 +4813,13 @@ int main(int argc, const char * const argv[])
     device_polar_e polar_default = DEVICE_POLAR_DEFAULT_VAL;
     device_switch_e switch_default = DEVICE_SWITCH_DEFAULT_VAL;
 
-    apr_int64_t integer_min;;
+    apr_int64_t integer_min;
     apr_int64_t integer_max;
+
+    apr_uint64_t hex_min;
+    apr_uint64_t hex_max;
+
+    device_case_e hex_case = DEVICE_HEX_CASE_VAL;
 
     apr_uint64_t text_min = DEVICE_TEXT_MIN_DEFAULT;
     apr_uint64_t text_max = DEVICE_TEXT_MAX_DEFAULT;
@@ -4633,6 +4845,9 @@ int main(int argc, const char * const argv[])
 
     device_parse_int64(&ds, "min", &integer_min);
     device_parse_int64(&ds, "max", &integer_max);
+
+    device_parse_hex64(&ds, "min", &hex_min);
+    device_parse_hex64(&ds, "max", &hex_max);
 
     setlocale(LC_CTYPE,"");
 
@@ -5071,6 +5286,56 @@ int main(int argc, const char * const argv[])
 
             status = device_parse_int64(&ds, optarg, &integer_max);
             if (APR_SUCCESS != status) {
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_HEX: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_HEX;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->h.min = hex_min;
+            pair->h.max = hex_max;
+            pair->h.cs = hex_case;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_HEX_MIN: {
+
+            status = device_parse_hex64(&ds, optarg, &hex_min);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_HEX_MAX: {
+
+            status = device_parse_hex64(&ds, optarg, &hex_max);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_HEX_CASE: {
+
+            if (!strcmp(optarg, "lower")) {
+                hex_case = DEVICE_IS_LOWER;
+            }
+            else if (!strcmp(optarg, "upper")) {
+                hex_case = DEVICE_IS_UPPER;
+            }
+            else {
+                apr_file_printf(ds.err, "argument '%s': is not 'lower' or 'upper'.\n",
+                        apr_pescape_echo(ds.pool, optarg, 1));
                 exit(2);
             }
 

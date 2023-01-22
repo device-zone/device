@@ -98,6 +98,7 @@
 #define DEVICE_HEX_MIN 296
 #define DEVICE_HEX_MAX 297
 #define DEVICE_HEX_CASE 298
+#define DEVICE_HEX_WIDTH 299
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -162,6 +163,8 @@ typedef struct device_set_t {
 #define DEVICE_POLAR_DEFAULT_VAL DEVICE_IS_NO
 #define DEVICE_SWITCH_DEFAULT_VAL DEVICE_IS_OFF
 #define DEVICE_HEX_CASE_VAL DEVICE_IS_LOWER
+#define DEVICE_HEX_WIDTH_VAL 0
+#define DEVICE_HEX_WIDTH_MAX 16
 #define DEVICE_TEXT_MIN_DEFAULT 0
 #define DEVICE_TEXT_MAX_DEFAULT 255
 #define DEVICE_TEXT_FORMAT_DEFAULT "UTF-8"
@@ -272,6 +275,7 @@ typedef struct device_pair_hex_t {
     apr_int64_t min;
     apr_int64_t max;
     device_case_e cs;
+    int width;
 } device_pair_hex_t;
 
 typedef struct device_pair_text_t {
@@ -371,6 +375,7 @@ static const apr_getopt_option_t
     { "hex-minimum", DEVICE_HEX_MIN, 1, "  --hex-minimum=min\t\tLower limit used by the next hex option. \"min\"\n\t\t\t\tfor down to 0x0." },
     { "hex-maximum", DEVICE_HEX_MAX, 1, "  --hex-maximum=max\t\tUpper limit used by the next hex option. \"max\"\n\t\t\t\tfor up to 0xffffffffffffffff." },
     { "hex-case", DEVICE_HEX_CASE, 1, "  --hex-case=upper|lower\tCase used by the next hex option. \"lower\" for\n\t\t\t\tlowercase, \"upper\" for uppercase. Defaults to \"lower\"." },
+    { "hex-width", DEVICE_HEX_WIDTH, 1, "  --hex-width=width\t\tMinimum field width used by the next hex option.\n\t\t\t\tDefaults to zero." },
     { "hex", DEVICE_HEX, 1, "  --hex=number\t\t\tParse an unsigned 64 bit hex number. Use \"min\" and\n\t\t\t\t\"max\" for lower and upper limit." },
     { "text-format", DEVICE_TEXT_FORMAT, 1, "  --text-format=format\t\tFormat used by the next text option. Defaults to UTF-8." },
     { "text-minimum", DEVICE_TEXT_MIN, 1, "  --text-minimum=min\t\tMinimum length used by the next text option." },
@@ -2924,7 +2929,7 @@ static apr_status_t device_parse_hex(device_set_t *ds, device_pair_t *pair,
 
         if (option) {
 
-            char fmt[16] = "%" APR_UINT64_T_HEX_FMT;
+            char fmt[16] = "%.*" APR_UINT64_T_HEX_FMT;
 
             if (pair->h.cs == DEVICE_IS_UPPER) {
                 char *x = strchr(fmt, 'x');
@@ -2933,7 +2938,7 @@ static apr_status_t device_parse_hex(device_set_t *ds, device_pair_t *pair,
                 }
             }
 
-            option[0] = apr_psprintf(ds->pool, fmt, result);
+            option[0] = apr_psprintf(ds->pool, fmt, pair->h.width, result);
         }
     }
 
@@ -3623,8 +3628,8 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
             apr_file_remove(keyval, ds->pool);
             if (symlink(keypath, keyval)) {
                 /* silently ignore any errors */
-	    }
-	}
+            }
+        }
 
         return APR_SUCCESS;
     }
@@ -4819,6 +4824,8 @@ int main(int argc, const char * const argv[])
     apr_uint64_t hex_min;
     apr_uint64_t hex_max;
 
+    apr_int64_t hex_width;
+
     device_case_e hex_case = DEVICE_HEX_CASE_VAL;
 
     apr_uint64_t text_min = DEVICE_TEXT_MIN_DEFAULT;
@@ -5302,6 +5309,7 @@ int main(int argc, const char * const argv[])
             pair->h.min = hex_min;
             pair->h.max = hex_max;
             pair->h.cs = hex_case;
+            pair->h.width = hex_width;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
@@ -5335,6 +5343,27 @@ int main(int argc, const char * const argv[])
             }
             else {
                 apr_file_printf(ds.err, "argument '%s': is not 'lower' or 'upper'.\n",
+                        apr_pescape_echo(ds.pool, optarg, 1));
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_HEX_WIDTH: {
+
+            status = device_parse_int64(&ds, optarg, &hex_width);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
+
+            if (hex_width > DEVICE_HEX_WIDTH_MAX) {
+                apr_file_printf(ds.err, "argument '%s': is larger than %d.\n",
+                        apr_pescape_echo(ds.pool, optarg, 1), DEVICE_HEX_WIDTH_MAX);
+                exit(2);
+            }
+
+            if (hex_width < 0) {
+                apr_file_printf(ds.err, "argument '%s': is less than zero.\n",
                         apr_pescape_echo(ds.pool, optarg, 1));
                 exit(2);
             }

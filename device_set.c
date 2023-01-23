@@ -65,40 +65,41 @@
 #define DEVICE_FQDN 263
 #define DEVICE_SELECT 264
 #define DEVICE_SELECT_BASE 265
-#define DEVICE_BYTES 266
-#define DEVICE_BYTES_MIN 267
-#define DEVICE_BYTES_MAX 268
-#define DEVICE_SYMLINK 269
-#define DEVICE_SYMLINK_BASE 270
-#define DEVICE_SYMLINK_SUFFIX 271
-#define DEVICE_SYMLINK_MAGIC 272
-#define DEVICE_SQL_IDENTIFIER 273
-#define DEVICE_SQL_DELIMITED_IDENTIFIER 274
-#define DEVICE_SQL_IDENTIFIER_MIN 275
-#define DEVICE_SQL_IDENTIFIER_MAX 276
-#define DEVICE_USER_GROUP 277
-#define DEVICE_USER 278
-#define DEVICE_DISTINGUISHED_NAME 279
-#define DEVICE_RELATION_BASE 280
-#define DEVICE_RELATION_NAME 281
-#define DEVICE_RELATION_SUFFIX 282
-#define DEVICE_RELATION 283
-#define DEVICE_POLAR 284
-#define DEVICE_POLAR_DEFAULT 285
-#define DEVICE_SWITCH 286
-#define DEVICE_SWITCH_DEFAULT 287
-#define DEVICE_INTEGER 288
-#define DEVICE_INTEGER_MIN 289
-#define DEVICE_INTEGER_MAX 290
-#define DEVICE_TEXT 291
-#define DEVICE_TEXT_MIN 292
-#define DEVICE_TEXT_MAX 293
-#define DEVICE_TEXT_FORMAT 294
-#define DEVICE_HEX 295
-#define DEVICE_HEX_MIN 296
-#define DEVICE_HEX_MAX 297
-#define DEVICE_HEX_CASE 298
-#define DEVICE_HEX_WIDTH 299
+#define DEVICE_SELECT_MATRIX 266
+#define DEVICE_BYTES 267
+#define DEVICE_BYTES_MIN 268
+#define DEVICE_BYTES_MAX 269
+#define DEVICE_SYMLINK 270
+#define DEVICE_SYMLINK_BASE 271
+#define DEVICE_SYMLINK_SUFFIX 272
+#define DEVICE_SYMLINK_MAGIC 273
+#define DEVICE_SQL_IDENTIFIER 274
+#define DEVICE_SQL_DELIMITED_IDENTIFIER 275
+#define DEVICE_SQL_IDENTIFIER_MIN 276
+#define DEVICE_SQL_IDENTIFIER_MAX 277
+#define DEVICE_USER_GROUP 278
+#define DEVICE_USER 279
+#define DEVICE_DISTINGUISHED_NAME 280
+#define DEVICE_RELATION_BASE 281
+#define DEVICE_RELATION_NAME 282
+#define DEVICE_RELATION_SUFFIX 283
+#define DEVICE_RELATION 284
+#define DEVICE_POLAR 285
+#define DEVICE_POLAR_DEFAULT 286
+#define DEVICE_SWITCH 287
+#define DEVICE_SWITCH_DEFAULT 288
+#define DEVICE_INTEGER 289
+#define DEVICE_INTEGER_MIN 290
+#define DEVICE_INTEGER_MAX 291
+#define DEVICE_TEXT 292
+#define DEVICE_TEXT_MIN 293
+#define DEVICE_TEXT_MAX 294
+#define DEVICE_TEXT_FORMAT 295
+#define DEVICE_HEX 296
+#define DEVICE_HEX_MIN 297
+#define DEVICE_HEX_MAX 298
+#define DEVICE_HEX_CASE 299
+#define DEVICE_HEX_WIDTH 300
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -343,6 +344,9 @@ static const apr_getopt_option_t
     { "unprivileged-port", DEVICE_UNPRIVILEGED_PORT, 1, "  --unprivileged-port=name\tParse an unprivileged port. Unprivileged ports\n\t\t\t\tare integers in the range 1025 to 49151." },
     { "hostname", DEVICE_HOSTNAME, 1, "  --hostname=name\t\tParse a hostname. Hostnames consist of the\n\t\t\t\tcharacters a-z, 0-9, or a hyphen. Hostname\n\t\t\t\tcannot start with a hyphen." },
     { "fqdn", DEVICE_FQDN, 1, "  --fqdn=name\t\t\tParse a fully qualified domain name. FQDNs\n\t\t\t\tconsist of labels containing the characters\n\t\t\t\ta-z, 0-9, or a hyphen, and cannot start with\n\t\t\t\ta hyphen. Labels are separated by dots, and\n\t\t\t\tthe total length cannot exceed 253 characters." },
+#if 0
+    { "select-matrix", DEVICE_SELECT_MATRIX, 1, "  --select-matrix=file\t\tCSV file containing valid combinations for\n\t\t\t\tselections. More than one file can be specified.\n\t\t\t\tThe CSV file is considered valid for all\n\t\t\t\tsubsequent select options." },
+#endif
     { "select-base", DEVICE_SELECT_BASE, 1, "  --select-base=file\t\tBase files containing options for possible\n\t\t\t\tselections. More than one file can be specified." },
     { "select", DEVICE_SELECT, 1, "  --select=name\t\t\tParse a selection from a file containing\n\t\t\t\toptions. The file containing options is\n\t\t\t\tsearched relative to the base path, and has\n\t\t\t\tthe same name as the result file. Unambiguous\n\t\t\t\tprefix matches are accepted." },
     { "bytes-minimum", DEVICE_BYTES_MIN, 1, "  --bytes-minimum=bytes\t\tLower limit used by the next bytes option. Zero\n\t\t\t\tfor no limit." },

@@ -100,6 +100,13 @@
 #define DEVICE_HEX_MAX 298
 #define DEVICE_HEX_CASE 299
 #define DEVICE_HEX_WIDTH 300
+#define DEVICE_URL_PATH 301
+#define DEVICE_URL_PATH_ABEMPTY 302
+#define DEVICE_URL_PATH_ABSOLUTE 303
+#define DEVICE_URL_PATH_NOSCHEME 304
+#define DEVICE_URL_PATH_ROOTLESS 305
+#define DEVICE_URL_PATH_EMPTY 306
+#define DEVICE_URL_PATH_MAX 307
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -169,6 +176,7 @@ typedef struct device_set_t {
 #define DEVICE_TEXT_MIN_DEFAULT 0
 #define DEVICE_TEXT_MAX_DEFAULT 255
 #define DEVICE_TEXT_FORMAT_DEFAULT "UTF-8"
+#define DEVICE_URL_PATH_MAX_DEFAULT 256
 
 typedef enum device_pair_e {
     DEVICE_PAIR_INDEX,
@@ -189,6 +197,12 @@ typedef enum device_pair_e {
     DEVICE_PAIR_INTEGER,
     DEVICE_PAIR_TEXT,
     DEVICE_PAIR_HEX,
+    DEVICE_PAIR_URL_PATH,
+    DEVICE_PAIR_URL_PATH_ABEMPTY,
+    DEVICE_PAIR_URL_PATH_ABSOLUTE,
+    DEVICE_PAIR_URL_PATH_NOSCHEME,
+    DEVICE_PAIR_URL_PATH_ROOTLESS,
+    DEVICE_PAIR_URL_PATH_EMPTY,
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -285,6 +299,10 @@ typedef struct device_pair_text_t {
     apr_uint64_t max;
 } device_pair_text_t;
 
+typedef struct device_pair_url_path_t {
+    apr_uint64_t max;
+} device_pair_url_path_t;
+
 typedef struct device_pair_t {
     const char *key;
     const char *suffix;
@@ -305,6 +323,7 @@ typedef struct device_pair_t {
         device_pair_integer_t i;
         device_pair_text_t t;
         device_pair_hex_t h;
+        device_pair_url_path_t up;
     };
 } device_pair_t;
 
@@ -385,6 +404,13 @@ static const apr_getopt_option_t
     { "text-minimum", DEVICE_TEXT_MIN, 1, "  --text-minimum=min\t\tMinimum length used by the next text option." },
     { "text-maximum", DEVICE_TEXT_MAX, 1, "  --text-maximum=max\t\tMaximum length used by the next text option." },
     { "text", DEVICE_TEXT, 1, "  --text=chars\t\t\tParse text, converting to given format (default UTF-8).\n\t\t\t\tInvalid text strings will be rejected." },
+    { "url-path", DEVICE_URL_PATH, 1, "  --url-path=name\t\tParse the path component of a URL. The path is\n\t\t\t\tdefined by section 3.3 of RFC3986." },
+    { "url-path-abempty", DEVICE_URL_PATH_ABEMPTY, 1, "  --url-path-abempty=name\tParse the absolute or empty path component of a URL.\n\t\t\t\tAbsolute or empty is defined by section 3.3 of RFC3986." },
+    { "url-path-absolute", DEVICE_URL_PATH_ABSOLUTE, 1, "  --url-path-absolute=name\tParse the absolute path component of a URL. Absolute is\n\t\t\t\tdefined by section 3.3 of RFC3986." },
+    { "url-path-noscheme", DEVICE_URL_PATH_NOSCHEME, 1, "  --url-path-noscheme=name\tParse the noscheme path component of a URL. Noscheme is\n\t\t\t\tdefined by section 3.3 of RFC3986." },
+    { "url-path-rootless", DEVICE_URL_PATH_ROOTLESS, 1, "  --url-path-rootless=name\tParse the rootless path component of a URL. Rootless is\n\t\t\t\tdefined by section 3.3 of RFC3986." },
+    { "url-path-empty", DEVICE_URL_PATH_EMPTY, 1, "  --url-path-empty=name\t\tParse the empty path component of a URL. Empty is\n\t\t\t\tdefined by section 3.3 of RFC3986." },
+    { "url-path-maximum", DEVICE_URL_PATH_MAX, 1, "  --url-path-maximum=max\tMaximum length used by the next path component of a URL." },
     { NULL }
 };
 
@@ -3040,6 +3066,296 @@ end:
     return status;
 }
 
+typedef struct device_url_path_state_t {
+    unsigned int abempty:1;
+    unsigned int absolute:1;
+    unsigned int noscheme:1;
+    unsigned int rootless:1;
+    unsigned int empty:1;
+    unsigned int percent:2;
+    int segments;
+    int last_slash;
+} device_url_path_state_t;
+
+typedef enum device_url_path_target_e {
+    DEVICE_URL_PATH_TARGET_PATH = 0,
+    DEVICE_URL_PATH_TARGET_ABEMPTY,
+    DEVICE_URL_PATH_TARGET_ABSOLUTE,
+    DEVICE_URL_PATH_TARGET_NOSCHEME,
+    DEVICE_URL_PATH_TARGET_ROOTLESS,
+    DEVICE_URL_PATH_TARGET_EMPTY
+} device_url_path_target_e;
+
+/*
+ * URL path is a URL encoded string limited by section 3.3 of RFC3986.
+ */
+static apr_status_t device_parse_url_path_ex(device_set_t *ds, device_pair_t *pair,
+        const char *arg, device_url_path_target_e target, apr_array_header_t *options, const char **option)
+{
+    apr_size_t len = 0;
+    device_url_path_state_t cur = { 0 };
+
+    /* we begin with all path types possible, and eliminate as we go */
+    cur.abempty = 1;
+    cur.absolute = 1;
+    cur.noscheme = 1;
+    cur.rootless = 1;
+    cur.empty = 1;
+    cur.segments = 0;
+    cur.last_slash = 0;
+    cur.percent = 0;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is missing.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    while (1) {
+        char c = arg[len++];
+
+        /* not too long? */
+        if (len >= pair->up.max) {
+            /* not ok */
+            apr_file_printf(ds->err, "argument '%s': '%s' is too long (%" APR_SIZE_T_FMT " character limit).\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    apr_pescape_echo(ds->pool,
+                            apr_pstrcat(ds->pool,
+                                    apr_pstrndup(ds->pool, arg, 64), "...",
+                                    NULL), 1), pair->up.max);
+            return APR_EINVAL;
+        }
+
+        /* hexdig expected */
+        if (cur.percent) {
+
+            /* but only two hexdigs */
+            if (cur.percent == 3) {
+                cur.percent = 0;
+                /* drop through */
+            }
+
+            /* hexdig is good */
+            else if ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || (c >= '0' && c <= '9')) {
+                cur.percent++;
+                continue;
+            }
+
+            /* not hexdig is bad */
+            else {
+                apr_file_printf(ds->err, "argument '%s': percent encoding cut short.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+                return APR_EINVAL;
+            }
+        }
+
+        /* end of path */
+        if (c == 0) {
+            if (len == 1) {
+                /* empty path detected */
+                cur.absolute = 0;
+                cur.noscheme = 0;
+                cur.rootless = 0;
+            }
+
+            break;
+        }
+
+        /* slash detected */
+        if (c == '/') {
+            if (len == 1) {
+                /* absolute path detected */
+                cur.noscheme = 0;
+                cur.rootless = 0;
+                cur.empty = 0;
+            }
+
+            if (len == 2 && cur.last_slash == 1) {
+                /* double slash detected */
+                apr_file_printf(ds->err, "argument '%s': second character cannot be a slash.\n",
+                        apr_pescape_echo(ds->pool, pair->key, 1));
+                return APR_EINVAL;
+            }
+
+            cur.segments++;
+            cur.last_slash = len;
+            continue;
+        }
+
+        /* unreserved detected */
+        /* unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~" */
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' || c == '~') {
+
+            if (len == 1) {
+                cur.absolute = 0;
+                cur.abempty = 0;
+                cur.empty = 0;
+            }
+
+            /* ok */
+            continue;
+        }
+
+        /* pct-encoded detected */
+        if (c == '%') {
+
+            if (len == 1) {
+                cur.absolute = 0;
+                cur.abempty = 0;
+                cur.empty = 0;
+            }
+
+            cur.percent++;
+            continue;
+        }
+
+        /* sub-delims detected */
+        if (c == '!' || c == '$' || c == '&' || c == '\'' || c == '(' || c == ')'
+                || c == '*' || c == '+' || c == ',' || c == ';' || c == '=') {
+
+            if (len == 1) {
+                cur.absolute = 0;
+                cur.abempty = 0;
+                cur.empty = 0;
+            }
+
+            /* ok */
+            continue;
+        }
+
+        /* colon detected */
+        if (c == ':') {
+
+            if (len == 1) {
+                cur.absolute = 0;
+                cur.abempty = 0;
+                cur.empty = 0;
+            }
+
+            if (cur.segments == 0) {
+                cur.noscheme = 0;
+            }
+
+            continue;
+        }
+
+        /* "@" detected */
+        if (c == '@') {
+
+            if (len == 1) {
+                cur.absolute = 0;
+                cur.abempty = 0;
+                cur.empty = 0;
+            }
+
+            /* ok */
+            continue;
+        }
+
+        /* anything else is a no */
+        else {
+            apr_file_printf(ds->err, "argument '%s': '%c' is an invalid character.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1), c);
+            return APR_EINVAL;
+        }
+
+    }
+
+    switch (target) {
+    case DEVICE_URL_PATH_TARGET_PATH: {
+        return APR_SUCCESS;
+    }
+    case DEVICE_URL_PATH_TARGET_ABEMPTY: {
+        if (cur.abempty) {
+            return APR_SUCCESS;
+        }
+        else {
+            apr_file_printf(ds->err, "argument '%s': path not absolute or empty.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+            return APR_EINVAL;
+        }
+    }
+    case DEVICE_URL_PATH_TARGET_ABSOLUTE: {
+        if (cur.absolute) {
+            return APR_SUCCESS;
+        }
+        else {
+            apr_file_printf(ds->err, "argument '%s': path not absolute.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+            return APR_EINVAL;
+        }
+    }
+    case DEVICE_URL_PATH_TARGET_NOSCHEME: {
+        if (cur.noscheme) {
+            return APR_SUCCESS;
+        }
+        else {
+            apr_file_printf(ds->err, "argument '%s': path contains a scheme\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+            return APR_EINVAL;
+        }
+    }
+    case DEVICE_URL_PATH_TARGET_ROOTLESS: {
+        if (cur.rootless) {
+            return APR_SUCCESS;
+        }
+        else {
+            apr_file_printf(ds->err, "argument '%s': path is not rootless\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+            return APR_EINVAL;
+        }
+    }
+    case DEVICE_URL_PATH_TARGET_EMPTY: {
+        if (cur.empty) {
+            return APR_SUCCESS;
+        }
+        else {
+            apr_file_printf(ds->err, "argument '%s': path is not empty\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+            return APR_EINVAL;
+        }
+    }
+    }
+
+    return APR_EINVAL;
+}
+
+static apr_status_t device_parse_url_path(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    return device_parse_url_path_ex(ds, pair, arg, DEVICE_URL_PATH_TARGET_PATH, options, option);
+}
+
+static apr_status_t device_parse_url_path_abempty(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    return device_parse_url_path_ex(ds, pair, arg, DEVICE_URL_PATH_TARGET_ABEMPTY, options, option);
+}
+
+static apr_status_t device_parse_url_path_absolute(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    return device_parse_url_path_ex(ds, pair, arg, DEVICE_URL_PATH_TARGET_ABSOLUTE, options, option);
+}
+
+static apr_status_t device_parse_url_path_noscheme(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    return device_parse_url_path_ex(ds, pair, arg, DEVICE_URL_PATH_TARGET_NOSCHEME, options, option);
+}
+
+static apr_status_t device_parse_url_path_rootless(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    return device_parse_url_path_ex(ds, pair, arg, DEVICE_URL_PATH_TARGET_ROOTLESS, options, option);
+}
+
+static apr_status_t device_parse_url_path_empty(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    return device_parse_url_path_ex(ds, pair, arg, DEVICE_URL_PATH_TARGET_EMPTY, options, option);
+}
+
 static apr_status_t device_get(device_set_t *ds, const char *arg,
         apr_array_header_t *options, const char **option, const char **path,
         int *exact)
@@ -3118,6 +3434,12 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
             case DEVICE_PAIR_SWITCH:
             case DEVICE_PAIR_INTEGER:
             case DEVICE_PAIR_TEXT:
+            case DEVICE_PAIR_URL_PATH:
+            case DEVICE_PAIR_URL_PATH_ABEMPTY:
+            case DEVICE_PAIR_URL_PATH_ABSOLUTE:
+            case DEVICE_PAIR_URL_PATH_NOSCHEME:
+            case DEVICE_PAIR_URL_PATH_ROOTLESS:
+            case DEVICE_PAIR_URL_PATH_EMPTY:
 
                 keyname = apr_pstrcat(pool, pair->key, pair->suffix, NULL);
                 if (APR_SUCCESS
@@ -3783,6 +4105,24 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             case DEVICE_PAIR_TEXT:
                 status = device_parse_text(ds, pair, value, options, NULL);
                 break;
+            case DEVICE_PAIR_URL_PATH:
+                status = device_parse_url_path(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_URL_PATH_ABEMPTY:
+                status = device_parse_url_path_abempty(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_URL_PATH_ABSOLUTE:
+                status = device_parse_url_path_absolute(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_URL_PATH_NOSCHEME:
+                status = device_parse_url_path_noscheme(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_URL_PATH_ROOTLESS:
+                status = device_parse_url_path_rootless(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_URL_PATH_EMPTY:
+                status = device_parse_url_path_empty(ds, pair, value, options, NULL);
+                break;
 
             default:
                 status = APR_EINVAL;
@@ -4131,6 +4471,24 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             break;
         case DEVICE_PAIR_TEXT:
             status = device_parse_text(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_URL_PATH:
+            status = device_parse_url_path(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_URL_PATH_ABEMPTY:
+            status = device_parse_url_path_abempty(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_URL_PATH_ABSOLUTE:
+            status = device_parse_url_path_absolute(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_URL_PATH_NOSCHEME:
+            status = device_parse_url_path_noscheme(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_URL_PATH_ROOTLESS:
+            status = device_parse_url_path_rootless(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_URL_PATH_EMPTY:
+            status = device_parse_url_path_empty(ds, pair, val, options, &val);
             break;
         }
 
@@ -4836,6 +5194,8 @@ int main(int argc, const char * const argv[])
     apr_uint64_t text_max = DEVICE_TEXT_MAX_DEFAULT;
     const char *text_format = DEVICE_TEXT_FORMAT_DEFAULT;
 
+    apr_uint64_t url_path_max = DEVICE_URL_PATH_MAX_DEFAULT;
+
     /* lets get APR off the ground, and make sure it terminates cleanly */
     if (APR_SUCCESS != (status = apr_app_initialize(&argc, &argv, NULL))) {
         return 1;
@@ -5411,6 +5771,99 @@ int main(int argc, const char * const argv[])
         case DEVICE_TEXT_FORMAT: {
 
             text_format = optarg;
+
+            break;
+        }
+        case DEVICE_URL_PATH: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_URL_PATH;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->up.max = text_max;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_URL_PATH_ABEMPTY: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_URL_PATH_ABEMPTY;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->up.max = text_max;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_URL_PATH_ABSOLUTE: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_URL_PATH_ABSOLUTE;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->up.max = text_max;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_URL_PATH_NOSCHEME: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_URL_PATH_NOSCHEME;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->up.max = text_max;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_URL_PATH_ROOTLESS: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_URL_PATH_ROOTLESS;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->up.max = text_max;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_URL_PATH_EMPTY: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_URL_PATH_EMPTY;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->up.max = text_max;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            break;
+        }
+        case DEVICE_URL_PATH_MAX: {
+
+            status = device_parse_uint64(&ds, optarg, &url_path_max);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
 
             break;
         }

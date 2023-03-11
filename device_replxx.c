@@ -394,7 +394,7 @@ int device_replxx(device_t *d)
 
         if (APR_SUCCESS != device_tokenize_to_argv(result, &args, &offsets, &states, &state, &error, d->tpool)) {
             apr_file_printf(d->err, "syntax error at '%c' (line %" APR_SIZE_T_FMT
-                    " column %ld)\n", *error, lines + 1, (error - result) + 1);
+                    " column %ld)\n", *error, lines + 1, (apr_size_t)(error - result + 1));
         }
 
         else if (args[0]) {

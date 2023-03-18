@@ -170,6 +170,7 @@ typedef struct device_set_t {
 #define DEVICE_FILE_UMASK (0x0113)
 #define DEVICE_POLAR_DEFAULT_VAL DEVICE_IS_NO
 #define DEVICE_SWITCH_DEFAULT_VAL DEVICE_IS_OFF
+#define DEVICE_RELATION_NONE "none"
 #define DEVICE_HEX_CASE_VAL DEVICE_IS_LOWER
 #define DEVICE_HEX_WIDTH_VAL 0
 #define DEVICE_HEX_WIDTH_MAX 16
@@ -2573,7 +2574,7 @@ static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
     }
 
     if (pair->optional == DEVICE_IS_OPTIONAL) {
-        none = DEVICE_SYMLINK_NONE;
+        none = DEVICE_RELATION_NONE;
     }
 
     apr_pool_create(&pool, ds->pool);
@@ -5782,7 +5783,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
-            pair->up.max = text_max;
+            pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
@@ -5796,7 +5797,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
-            pair->up.max = text_max;
+            pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
@@ -5810,7 +5811,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
-            pair->up.max = text_max;
+            pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
@@ -5824,7 +5825,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
-            pair->up.max = text_max;
+            pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
@@ -5838,7 +5839,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
-            pair->up.max = text_max;
+            pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
@@ -5852,7 +5853,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
-            pair->up.max = text_max;
+            pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 

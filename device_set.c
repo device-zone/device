@@ -55,6 +55,10 @@
 #if HAVE_ICONV_H
 #include <iconv.h>
 #endif
+#if HAVE_SELINUX_SELINUX_H
+#include <selinux/selinux.h>
+#include <selinux/context.h>
+#endif
 
 #define DEVICE_OPTIONAL 257
 #define DEVICE_REQUIRED 258
@@ -72,41 +76,42 @@
 #define DEVICE_SYMLINK 270
 #define DEVICE_SYMLINK_BASE 271
 #define DEVICE_SYMLINK_SUFFIX 272
-#define DEVICE_SYMLINK_MAGIC 273
-#define DEVICE_SQL_IDENTIFIER 274
-#define DEVICE_SQL_DELIMITED_IDENTIFIER 275
-#define DEVICE_SQL_IDENTIFIER_MIN 276
-#define DEVICE_SQL_IDENTIFIER_MAX 277
-#define DEVICE_USER_GROUP 278
-#define DEVICE_USER 279
-#define DEVICE_DISTINGUISHED_NAME 280
-#define DEVICE_RELATION_BASE 281
-#define DEVICE_RELATION_NAME 282
-#define DEVICE_RELATION_SUFFIX 283
-#define DEVICE_RELATION 284
-#define DEVICE_POLAR 285
-#define DEVICE_POLAR_DEFAULT 286
-#define DEVICE_SWITCH 287
-#define DEVICE_SWITCH_DEFAULT 288
-#define DEVICE_INTEGER 289
-#define DEVICE_INTEGER_MIN 290
-#define DEVICE_INTEGER_MAX 291
-#define DEVICE_TEXT 292
-#define DEVICE_TEXT_MIN 293
-#define DEVICE_TEXT_MAX 294
-#define DEVICE_TEXT_FORMAT 295
-#define DEVICE_HEX 296
-#define DEVICE_HEX_MIN 297
-#define DEVICE_HEX_MAX 298
-#define DEVICE_HEX_CASE 299
-#define DEVICE_HEX_WIDTH 300
-#define DEVICE_URL_PATH 301
-#define DEVICE_URL_PATH_ABEMPTY 302
-#define DEVICE_URL_PATH_ABSOLUTE 303
-#define DEVICE_URL_PATH_NOSCHEME 304
-#define DEVICE_URL_PATH_ROOTLESS 305
-#define DEVICE_URL_PATH_EMPTY 306
-#define DEVICE_URL_PATH_MAX 307
+#define DEVICE_SYMLINK_CONTEXT_TYPE 273
+#define DEVICE_SYMLINK_MAGIC 274
+#define DEVICE_SQL_IDENTIFIER 275
+#define DEVICE_SQL_DELIMITED_IDENTIFIER 276
+#define DEVICE_SQL_IDENTIFIER_MIN 277
+#define DEVICE_SQL_IDENTIFIER_MAX 278
+#define DEVICE_USER_GROUP 279
+#define DEVICE_USER 280
+#define DEVICE_DISTINGUISHED_NAME 281
+#define DEVICE_RELATION_BASE 282
+#define DEVICE_RELATION_NAME 283
+#define DEVICE_RELATION_SUFFIX 284
+#define DEVICE_RELATION 285
+#define DEVICE_POLAR 286
+#define DEVICE_POLAR_DEFAULT 287
+#define DEVICE_SWITCH 288
+#define DEVICE_SWITCH_DEFAULT 289
+#define DEVICE_INTEGER 290
+#define DEVICE_INTEGER_MIN 291
+#define DEVICE_INTEGER_MAX 292
+#define DEVICE_TEXT 293
+#define DEVICE_TEXT_MIN 294
+#define DEVICE_TEXT_MAX 295
+#define DEVICE_TEXT_FORMAT 296
+#define DEVICE_HEX 297
+#define DEVICE_HEX_MIN 298
+#define DEVICE_HEX_MAX 299
+#define DEVICE_HEX_CASE 300
+#define DEVICE_HEX_WIDTH 301
+#define DEVICE_URL_PATH 302
+#define DEVICE_URL_PATH_ABEMPTY 303
+#define DEVICE_URL_PATH_ABSOLUTE 304
+#define DEVICE_URL_PATH_NOSCHEME 305
+#define DEVICE_URL_PATH_ROOTLESS 306
+#define DEVICE_URL_PATH_EMPTY 307
+#define DEVICE_URL_PATH_MAX 308
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -146,6 +151,7 @@ typedef struct device_set_t {
     apr_array_header_t *relation_bases;
     const char *symlink_suffix;
     int symlink_suffix_len;
+    const char *symlink_context_type;
     const char *relation_name;
     int relation_name_len;
     const char *relation_suffix;
@@ -255,6 +261,7 @@ typedef struct device_pair_symlinks_t {
     apr_array_header_t *bases;
     const char *symlink_suffix;
     int symlink_suffix_len;
+    const char *symlink_context_type;
 } device_pair_symlinks_t;
 
 typedef struct device_pair_relations_t {
@@ -374,6 +381,9 @@ static const apr_getopt_option_t
     { "bytes", DEVICE_BYTES, 1, "  --bytes=name\t\t\tParse a positive integer containing bytes.\n\t\t\t\tOptional modifiers like B, kB, KiB, MB, MiB,\n\t\t\t\tGB, GiB, TB, TiB, PB, PiB, EB, EiB are accepted,\n\t\t\t\tand the given string is expanded into a byte\n\t\t\t\tvalue. Modifiers outside of the specified byte\n\t\t\t\trange are ignored." },
     { "symlink-base", DEVICE_SYMLINK_BASE, 1, "  --symlink-base=path\t\tBase path containing targets for symbolic links.\n\t\t\t\tMore than one path can be specified. In the case\n\t\t\t\tof collision, the earliest match wins." },
     { "symlink-suffix", DEVICE_SYMLINK_SUFFIX, 1, "  --symlink-suffix=suffix\tLimit targets for symbolic links to this suffix." },
+#if HAVE_SELINUX_SELINUX_H
+    { "symlink-context-type", DEVICE_SYMLINK_CONTEXT_TYPE, 1, "  --symlink-context-type=type\tLimit targets for symbolic links to this SELinux\n\t\t\t\tcontext type." },
+#endif
 #if 0
     { "symlink-magic", DEVICE_SYMLINK_MAGIC, 1, "  --symlink-magic=magic\tLimit targets for symbolic links to this magic file definition." },
 #endif
@@ -1541,6 +1551,54 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
                 if (dirent.name[0] == '.') {
                     continue;
                 }
+
+#if HAVE_SELINUX_SELINUX_H
+                /* check selinux context */
+                if (pair->s.symlink_context_type) {
+                    char *raw = NULL;
+                    char *target;
+                    int len;
+
+                    if (APR_SUCCESS
+                            != (status = apr_filepath_merge(&target, base,
+                                    dirent.name,
+                                    APR_FILEPATH_NATIVE, ds->pool))) {
+                        apr_file_printf(ds->err, "cannot merge for context '%s': %pm\n", pair->key,
+                                &status);
+                        continue;
+                    }
+
+                    len = getfilecon(target, &raw);
+
+                    if (len < 0) {
+
+                        switch (errno) {
+                        case ENOTSUP:
+                            /* not supported - allow through */
+                            break;
+                        default:
+                            /* all other errors - ignore file */
+                            continue;
+                        }
+
+                    }
+                    else {
+                        context_t con = context_new(raw);
+
+                        const char *type = context_type_get(con);
+
+                        if (strcmp(pair->s.symlink_context_type, type)) {
+                            context_free(con);
+                            freecon(raw);
+                            /* no match - ignore file */
+                            continue;
+                        }
+
+                        context_free(con);
+                        freecon(raw);
+                    }
+                }
+#endif
 
                 /* suffixes? */
                 if (pair->s.symlink_suffix) {
@@ -5415,10 +5473,14 @@ int main(int argc, const char * const argv[])
             pair->s.bases = ds.symlink_bases;
             pair->s.symlink_suffix = ds.symlink_suffix;
             pair->s.symlink_suffix_len = ds.symlink_suffix_len;
+            pair->s.symlink_context_type = ds.symlink_context_type;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.symlink_bases = NULL;
+            ds.symlink_suffix = NULL;
+            ds.symlink_suffix_len = 0;
+            ds.symlink_context_type = NULL;
 
             break;
         }
@@ -5437,6 +5499,10 @@ int main(int argc, const char * const argv[])
         case DEVICE_SYMLINK_SUFFIX: {
             ds.symlink_suffix = optarg;
             ds.symlink_suffix_len = strlen(optarg);
+            break;
+        }
+        case DEVICE_SYMLINK_CONTEXT_TYPE: {
+            ds.symlink_context_type = optarg;
             break;
         }
         case DEVICE_SQL_IDENTIFIER: {

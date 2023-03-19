@@ -342,7 +342,6 @@ int device_libedit(device_t *d, const char *name, FILE *in, FILE *out, FILE *err
 
     while (1) {
         const char *result = NULL;
-        const LineInfo *li;
         const char **args;
         device_offset_t *offsets;
         device_tokenize_state_t *states;
@@ -358,7 +357,7 @@ int device_libedit(device_t *d, const char *name, FILE *in, FILE *out, FILE *err
             break;
         }
 
-        li = el_line(el);
+        el_line(el);
 
         history(hist, &ev, continuation ? H_APPEND : H_ENTER, result);
 

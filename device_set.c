@@ -78,40 +78,43 @@
 #define DEVICE_SYMLINK_SUFFIX 272
 #define DEVICE_SYMLINK_CONTEXT_TYPE 273
 #define DEVICE_SYMLINK_MAGIC 274
-#define DEVICE_SQL_IDENTIFIER 275
-#define DEVICE_SQL_DELIMITED_IDENTIFIER 276
-#define DEVICE_SQL_IDENTIFIER_MIN 277
-#define DEVICE_SQL_IDENTIFIER_MAX 278
-#define DEVICE_USER_GROUP 279
-#define DEVICE_USER 280
-#define DEVICE_DISTINGUISHED_NAME 281
-#define DEVICE_RELATION_BASE 282
-#define DEVICE_RELATION_NAME 283
-#define DEVICE_RELATION_SUFFIX 284
-#define DEVICE_RELATION 285
-#define DEVICE_POLAR 286
-#define DEVICE_POLAR_DEFAULT 287
-#define DEVICE_SWITCH 288
-#define DEVICE_SWITCH_DEFAULT 289
-#define DEVICE_INTEGER 290
-#define DEVICE_INTEGER_MIN 291
-#define DEVICE_INTEGER_MAX 292
-#define DEVICE_TEXT 293
-#define DEVICE_TEXT_MIN 294
-#define DEVICE_TEXT_MAX 295
-#define DEVICE_TEXT_FORMAT 296
-#define DEVICE_HEX 297
-#define DEVICE_HEX_MIN 298
-#define DEVICE_HEX_MAX 299
-#define DEVICE_HEX_CASE 300
-#define DEVICE_HEX_WIDTH 301
-#define DEVICE_URL_PATH 302
-#define DEVICE_URL_PATH_ABEMPTY 303
-#define DEVICE_URL_PATH_ABSOLUTE 304
-#define DEVICE_URL_PATH_NOSCHEME 305
-#define DEVICE_URL_PATH_ROOTLESS 306
-#define DEVICE_URL_PATH_EMPTY 307
-#define DEVICE_URL_PATH_MAX 308
+#define DEVICE_SYMLINK_RECURSIVE 275
+#define DEVICE_SQL_IDENTIFIER 276
+#define DEVICE_SQL_DELIMITED_IDENTIFIER 277
+#define DEVICE_SQL_IDENTIFIER_MIN 278
+#define DEVICE_SQL_IDENTIFIER_MAX 279
+#define DEVICE_USER_GROUP 280
+#define DEVICE_USER 281
+#define DEVICE_DISTINGUISHED_NAME 282
+#define DEVICE_RELATION_BASE 283
+#define DEVICE_RELATION_NAME 284
+#define DEVICE_RELATION_SUFFIX 285
+#define DEVICE_RELATION 286
+#define DEVICE_POLAR 287
+#define DEVICE_POLAR_DEFAULT 288
+#define DEVICE_SWITCH 289
+#define DEVICE_SWITCH_DEFAULT 290
+#define DEVICE_INTEGER 291
+#define DEVICE_INTEGER_MIN 292
+#define DEVICE_INTEGER_MAX 293
+#define DEVICE_TEXT 294
+#define DEVICE_TEXT_MIN 295
+#define DEVICE_TEXT_MAX 296
+#define DEVICE_TEXT_FORMAT 297
+#define DEVICE_HEX 298
+#define DEVICE_HEX_MIN 299
+#define DEVICE_HEX_MAX 300
+#define DEVICE_HEX_CASE 301
+#define DEVICE_HEX_WIDTH 302
+#define DEVICE_URL_PATH 303
+#define DEVICE_URL_PATH_ABEMPTY 304
+#define DEVICE_URL_PATH_ABSOLUTE 305
+#define DEVICE_URL_PATH_NOSCHEME 306
+#define DEVICE_URL_PATH_ROOTLESS 307
+#define DEVICE_URL_PATH_EMPTY 308
+#define DEVICE_URL_PATH_MAX 309
+#define DEVICE_ADDRESS 310
+#define DEVICE_ADDRESS_LOCALPART 311
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -386,6 +389,7 @@ static const apr_getopt_option_t
 #endif
 #if 0
     { "symlink-magic", DEVICE_SYMLINK_MAGIC, 1, "  --symlink-magic=magic\tLimit targets for symbolic links to this magic file definition." },
+    { "symlink-recursive", DEVICE_SYMLINK_RECURSIVE, 0, "  --symlink-recursive\tLimit targets for symbolic links to directories recursively below this level." },
 #endif
     { "symlink", DEVICE_SYMLINK, 1, "  --symlink=name\t\tParse a selection from a list of files or\n\t\t\t\tdirectories matching the symlink-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
     { "sql-id", DEVICE_SQL_IDENTIFIER, 1, "  --sql-id=id\t\t\tSQL identifier in regular format. Regular\n\t\t\t\tidentifiers start with a letter (a-z, but also\n\t\t\t\tletters with diacritical marks and non-Latin\n\t\t\t\tletters) or an underscore (_). Subsequent\n\t\t\t\tcharacters in an identifier can be letters,\n\t\t\t\tunderscores, or digits (0-9). The resulting value\n\t\t\t\tdoes not need to be SQL escaped before use." },
@@ -422,6 +426,10 @@ static const apr_getopt_option_t
     { "url-path-rootless", DEVICE_URL_PATH_ROOTLESS, 1, "  --url-path-rootless=name\tParse the rootless path component of a URL. Rootless is\n\t\t\t\tdefined by section 3.3 of RFC3986." },
     { "url-path-empty", DEVICE_URL_PATH_EMPTY, 1, "  --url-path-empty=name\t\tParse the empty path component of a URL. Empty is\n\t\t\t\tdefined by section 3.3 of RFC3986." },
     { "url-path-maximum", DEVICE_URL_PATH_MAX, 1, "  --url-path-maximum=max\tMaximum length used by the next path component of a URL." },
+#if 0
+    { "address", DEVICE_ADDRESS, 1, "  --address=name\tParse an email address." },
+    { "address-localpart", DEVICE_ADDRESS_LOCALPART, 1, "  --address-localpart=name\tParse the local part of an email address." },
+#endif
     { NULL }
 };
 

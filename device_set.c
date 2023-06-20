@@ -447,7 +447,7 @@ static const apr_getopt_option_t
     { "uri-absolute", DEVICE_URI_ABSOLUTE, 1, "  --uri-absolute=name\t\tParse an absolute URI. The absolute URI has a scheme\n\t\t\t\tand no fragment, and is defined by section 4.3 of RFC3986." },
     { "uri-relative", DEVICE_URI_RELATIVE, 1, "  --uri-relative=name\t\tParse a relative URI. The relative URI is defined by\n\t\t\t\tsection 4.2 of RFC3986." },
     { "uri-maximum", DEVICE_URI_MAX, 1, "  --uri-maximum=max\t\tMaximum length used by the next URI." },
-    { "uri-schemes", DEVICE_URI_SCHEMES, 1, "  --uri-schemes=s1[,s2[...]]\t\tSchemes accepted by the next URI." },
+    { "uri-schemes", DEVICE_URI_SCHEMES, 1, "  --uri-schemes=s1[,s2[...]]\tSchemes accepted by the next URI." },
 #if 0
     { "address", DEVICE_ADDRESS, 1, "  --address=name\tParse an email address." },
     { "address-localpart", DEVICE_ADDRESS_LOCALPART, 1, "  --address-localpart=name\tParse the local part of an email address." },
@@ -753,6 +753,7 @@ static apr_status_t device_parse_index(device_set_t *ds, device_pair_t *pair,
     apr_status_t status;
     int found = 0;
 
+    /* can an index be optional? */
     if (!arg || !arg[0]) {
         apr_file_printf(ds->err, "argument '%s': is empty.\n",
                 apr_pescape_echo(ds->pool, pair->key, 1));
@@ -982,14 +983,25 @@ static apr_status_t device_parse_index(device_set_t *ds, device_pair_t *pair,
  * Port is an integer between 0 and 65535 inclusive.
  */
 static apr_status_t device_parse_port(device_set_t *ds, device_pair_t *pair,
-        const char *arg)
+        const char *arg, const char **option)
 {
     char *end;
 
-    if (!arg || !arg[0]) {
+    if (!arg) {
         apr_file_printf(ds->err, "argument '%s': is empty.\n",
                 apr_pescape_echo(ds->pool, pair->key, 1));
         return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
     }
 
     apr_int64_t port = apr_strtoi64(arg, &end, 10);
@@ -999,6 +1011,9 @@ static apr_status_t device_parse_port(device_set_t *ds, device_pair_t *pair,
                 apr_pescape_echo(ds->pool, arg, 1));
         return APR_EINVAL;
     }
+    if (option) {
+        option[0] = arg;
+    }
     return APR_SUCCESS;
 }
 
@@ -1006,14 +1021,25 @@ static apr_status_t device_parse_port(device_set_t *ds, device_pair_t *pair,
  * Port is an integer between 1025 and 49151 inclusive.
  */
 static apr_status_t device_parse_unprivileged_port(device_set_t *ds,
-        device_pair_t *pair, const char *arg)
+        device_pair_t *pair, const char *arg, const char **option)
 {
     char *end;
 
-    if (!arg || !arg[0]) {
+    if (!arg) {
         apr_file_printf(ds->err, "argument '%s': is empty.\n",
                 apr_pescape_echo(ds->pool, pair->key, 1));
         return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
     }
 
     apr_int64_t port = apr_strtoi64(arg, &end, 10);
@@ -1022,6 +1048,9 @@ static apr_status_t device_parse_unprivileged_port(device_set_t *ds,
                 apr_pescape_echo(ds->pool, pair->key, 1),
                 apr_pescape_echo(ds->pool, arg, 1));
         return APR_EINVAL;
+    }
+    if (option) {
+        option[0] = arg;
     }
     return APR_SUCCESS;
 }
@@ -1033,14 +1062,25 @@ static apr_status_t device_parse_unprivileged_port(device_set_t *ds,
  * https://man7.org/linux/man-pages/man7/hostname.7.html
  */
 static apr_status_t device_parse_hostname(device_set_t *ds, device_pair_t *pair,
-        const char *arg)
+        const char *arg, const char **option)
 {
     int len = 0;
 
-    if (!arg || !arg[0]) {
+    if (!arg) {
         apr_file_printf(ds->err, "argument '%s': is empty.\n",
                 apr_pescape_echo(ds->pool, pair->key, 1));
         return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
     }
 
     while (arg[len]) {
@@ -1082,6 +1122,10 @@ static apr_status_t device_parse_hostname(device_set_t *ds, device_pair_t *pair,
         }
     }
 
+    if (option) {
+        option[0] = arg;
+    }
+
     return APR_SUCCESS;
 }
 
@@ -1091,14 +1135,25 @@ static apr_status_t device_parse_hostname(device_set_t *ds, device_pair_t *pair,
  * inclusive.
  */
 static apr_status_t device_parse_fqdn(device_set_t *ds, device_pair_t *pair,
-        const char *arg)
+        const char *arg, const char **option)
 {
     int len = 0, hlen = 0;
 
-    if (!arg || !arg[0]) {
+    if (!arg) {
         apr_file_printf(ds->err, "argument '%s': is empty.\n",
                 apr_pescape_echo(ds->pool, pair->key, 1));
         return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
     }
 
     while (arg[len]) {
@@ -1161,6 +1216,10 @@ static apr_status_t device_parse_fqdn(device_set_t *ds, device_pair_t *pair,
                     apr_pescape_echo(ds->pool, pair->key, 1));
             return APR_EINVAL;
         }
+    }
+
+    if (option) {
+        option[0] = arg;
     }
 
     return APR_SUCCESS;
@@ -1339,10 +1398,21 @@ static apr_status_t device_parse_bytes(device_set_t *ds, device_pair_t *pair,
 
     apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
 
-    if (!arg || !arg[0]) {
+    if (!arg) {
         apr_file_printf(ds->err, "argument '%s': is empty.\n",
                 apr_pescape_echo(ds->pool, pair->key, 1));
         return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
     }
 
     if (arg[0] == '-') {
@@ -1906,10 +1976,21 @@ static apr_status_t device_parse_sql_identifier(device_set_t *ds, device_pair_t 
 
     int len = 0;
 
-    if (!arg || !arg[0]) {
+    if (!arg) {
         apr_file_printf(ds->err, "argument '%s': is empty.\n",
                 apr_pescape_echo(ds->pool, pair->key, 1));
         return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (translated) {
+            translated[0] = NULL;
+        }
+        return APR_SUCCESS;
     }
 
     status = apr_xlate_open(&convset, "UTF-8", APR_LOCALE_CHARSET, ds->pool);
@@ -2005,10 +2086,21 @@ static apr_status_t device_parse_sql_delimited_identifier(device_set_t *ds, devi
 
     int len = 0;
 
-    if (!arg || !arg[0]) {
+    if (!arg) {
         apr_file_printf(ds->err, "argument '%s': is empty.\n",
                 apr_pescape_echo(ds->pool, pair->key, 1));
         return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (translated) {
+            translated[0] = NULL;
+        }
+        return APR_SUCCESS;
     }
 
     status = apr_xlate_open(&convset, "UTF-8", APR_LOCALE_CHARSET, ds->pool);
@@ -3022,7 +3114,26 @@ static apr_status_t device_parse_integer(device_set_t *ds, device_pair_t *pair,
 {
     apr_int64_t result;
 
-    apr_status_t status = device_parse_int64(ds, arg, &result);
+    apr_status_t status;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
+
+    status = device_parse_int64(ds, arg, &result);
 
     if (APR_SUCCESS == status) {
 
@@ -3057,7 +3168,26 @@ static apr_status_t device_parse_hex(device_set_t *ds, device_pair_t *pair,
 {
     apr_uint64_t result;
 
-    apr_status_t status = device_parse_hex64(ds, arg, &result);
+    apr_status_t status;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
+
+    status = device_parse_hex64(ds, arg, &result);
 
     if (APR_SUCCESS == status) {
 
@@ -3115,6 +3245,23 @@ static apr_status_t device_parse_text(device_set_t *ds, device_pair_t *pair,
                 device_pescape_shell(ds->pool, pair->key), from, pair->t.format,
                 &status);
         return status;
+    }
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
     }
 
     inbuf = (char *)arg;
@@ -3379,12 +3526,31 @@ static apr_status_t device_parse_url_path(device_set_t *ds, device_pair_t *pair,
     device_url_path_state_t cur = { 0 };
     apr_status_t status;
 
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
+
     status = device_parse_url_path_ex(ds, pair, arg, &cur, pair->up.max);
     if (APR_SUCCESS != status) {
         return status;
     }
 
-    *option = arg;
+    if (option) {
+        option[0] = arg;
+    }
 
     return APR_SUCCESS;
 }
@@ -3394,6 +3560,23 @@ static apr_status_t device_parse_url_path_abempty(device_set_t *ds, device_pair_
 {
     device_url_path_state_t cur = { 0 };
     apr_status_t status;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
 
     status = device_parse_url_path_ex(ds, pair, arg, &cur, pair->up.max);
     if (APR_SUCCESS != status) {
@@ -3406,7 +3589,9 @@ static apr_status_t device_parse_url_path_abempty(device_set_t *ds, device_pair_
         return APR_EINVAL;
     }
 
-    *option = arg;
+    if (option) {
+        option[0] = arg;
+    }
 
     return APR_SUCCESS;
 }
@@ -3416,6 +3601,23 @@ static apr_status_t device_parse_url_path_absolute(device_set_t *ds, device_pair
 {
     device_url_path_state_t cur = { 0 };
     apr_status_t status;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
 
     status = device_parse_url_path_ex(ds, pair, arg, &cur, pair->up.max);
     if (APR_SUCCESS != status) {
@@ -3428,7 +3630,9 @@ static apr_status_t device_parse_url_path_absolute(device_set_t *ds, device_pair
         return APR_EINVAL;
     }
 
-    *option = arg;
+    if (option) {
+        option[0] = arg;
+    }
 
     return APR_SUCCESS;
 }
@@ -3438,6 +3642,23 @@ static apr_status_t device_parse_url_path_noscheme(device_set_t *ds, device_pair
 {
     device_url_path_state_t cur = { 0 };
     apr_status_t status;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
 
     status = device_parse_url_path_ex(ds, pair, arg, &cur, pair->up.max);
     if (APR_SUCCESS != status) {
@@ -3450,7 +3671,9 @@ static apr_status_t device_parse_url_path_noscheme(device_set_t *ds, device_pair
         return APR_EINVAL;
     }
 
-    *option = arg;
+    if (option) {
+        option[0] = arg;
+    }
 
     return APR_SUCCESS;
 }
@@ -3460,6 +3683,23 @@ static apr_status_t device_parse_url_path_rootless(device_set_t *ds, device_pair
 {
     device_url_path_state_t cur = { 0 };
     apr_status_t status;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
 
     status = device_parse_url_path_ex(ds, pair, arg, &cur, pair->up.max);
     if (APR_SUCCESS != status) {
@@ -3472,7 +3712,9 @@ static apr_status_t device_parse_url_path_rootless(device_set_t *ds, device_pair
         return APR_EINVAL;
     }
 
-    *option = arg;
+    if (option) {
+        option[0] = arg;
+    }
 
     return APR_SUCCESS;
 }
@@ -3482,6 +3724,23 @@ static apr_status_t device_parse_url_path_empty(device_set_t *ds, device_pair_t 
 {
     device_url_path_state_t cur = { 0 };
     apr_status_t status;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
 
     status = device_parse_url_path_ex(ds, pair, arg, &cur, pair->up.max);
     if (APR_SUCCESS != status) {
@@ -3494,7 +3753,9 @@ static apr_status_t device_parse_url_path_empty(device_set_t *ds, device_pair_t 
         return APR_EINVAL;
     }
 
-    *option = arg;
+    if (option) {
+        option[0] = arg;
+    }
 
     return APR_SUCCESS;
 }
@@ -3514,9 +3775,21 @@ static apr_status_t device_parse_uri_ex(device_set_t *ds, device_pair_t *pair,
     apr_uri_t uri;
     apr_status_t status;
 
-    if (!arg || !arg[0]) {
-        apr_file_printf(ds->err, "uri is empty.\n");
+    if (!arg) {
+        apr_file_printf(ds->err, "'%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
         return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
     }
 
     status = apr_uri_parse(ds->pool, arg, &uri);
@@ -3537,7 +3810,9 @@ static apr_status_t device_parse_uri_ex(device_set_t *ds, device_pair_t *pair,
         }
     }
 
-    *option = arg;
+    if (option) {
+        option[0] = arg;
+    }
 
     switch (target) {
     case DEVICE_URI_TARGET: {
@@ -4357,16 +4632,16 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
                 status = device_parse_index(ds, pair, value, NULL, NULL);
                 break;
             case DEVICE_PAIR_PORT:
-                status = device_parse_port(ds, pair, value);
+                status = device_parse_port(ds, pair, value, NULL);
                 break;
             case DEVICE_PAIR_UNPRIVILEGED_PORT:
-                status = device_parse_unprivileged_port(ds, pair, value);
+                status = device_parse_unprivileged_port(ds, pair, value, NULL);
                 break;
             case DEVICE_PAIR_HOSTNAME:
-                status = device_parse_hostname(ds, pair, value);
+                status = device_parse_hostname(ds, pair, value, NULL);
                 break;
             case DEVICE_PAIR_FQDN:
-                status = device_parse_fqdn(ds, pair, value);
+                status = device_parse_fqdn(ds, pair, value, NULL);
                 break;
             case DEVICE_PAIR_SELECT:
                 status = device_parse_select(ds, pair, value, options, NULL);
@@ -4722,16 +4997,16 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             status = device_parse_index(ds, pair, val, &val, files);
             break;
         case DEVICE_PAIR_PORT:
-            status = device_parse_port(ds, pair, val);
+            status = device_parse_port(ds, pair, val, &val);
             break;
         case DEVICE_PAIR_UNPRIVILEGED_PORT:
-            status = device_parse_unprivileged_port(ds, pair, val);
+            status = device_parse_unprivileged_port(ds, pair, val, &val);
             break;
         case DEVICE_PAIR_HOSTNAME:
-            status = device_parse_hostname(ds, pair, val);
+            status = device_parse_hostname(ds, pair, val, &val);
             break;
         case DEVICE_PAIR_FQDN:
-            status = device_parse_fqdn(ds, pair, val);
+            status = device_parse_fqdn(ds, pair, val, &val);
             break;
         case DEVICE_PAIR_SELECT:
             status = device_parse_select(ds, pair, val, options, &val);

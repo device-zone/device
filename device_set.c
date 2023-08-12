@@ -3240,7 +3240,8 @@ static apr_status_t device_parse_text(device_set_t *ds, device_pair_t *pair,
 
     iconv_t ic = iconv_open(pair->t.format, from);
 
-    if (APR_SUCCESS != (status = errno)) {
+    if ((iconv_t)(-1) == ic) {
+    	status = errno;
         apr_file_printf(ds->err, "%s: cannot convert '%s' to '%s': %pm\n",
                 device_pescape_shell(ds->pool, pair->key), from, pair->t.format,
                 &status);

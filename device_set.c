@@ -141,6 +141,7 @@ typedef enum device_mode_e {
     DEVICE_REMOVE,
     DEVICE_MARK,
     DEVICE_REINDEX,
+    DEVICE_RENAME,
 } device_mode_e;
 
 typedef struct device_set_t {
@@ -382,6 +383,7 @@ static const apr_getopt_option_t
     { "remove", 'd', 1, "  -d, --remove=name\t\tRemove a set of options, named by the key\n\t\t\t\tspecified. The removal takes place immediately." },
     { "mark", 'm', 1, "  -m, --mark=name\t\tMark a set of options for removal, named by the\n\t\t\t\tkey specified. The actual removal is expected\n\t\t\t\tto be done by the script that processes this\n\t\t\t\toption. A file called '" DEVICE_REMOVE_MARKER "' will be created\n\t\t\t\tin the directory to indicate the directory\n\t\t\t\tshould be processed for removal." },
     { "set", 's', 1, "  -s, --set=name\t\tSet an option among a set of options, named by\n\t\t\t\tthe key specified. A file called '" DEVICE_SET_MARKER "' is\n\t\t\t\tcreated to indicate that settings should be\n\t\t\t\tprocessed for update." },
+    { "rename", 'n', 1, "  -n, --rename=name\t\tRename an option among a set of options, named by\n\t\t\t\tthe key specified. Other options may be set at\n\t\t\t\tthe same time. A file called '" DEVICE_SET_MARKER "' is\n\t\t\t\tcreated to indicate that settings should be\n\t\t\t\tprocessed for update." },
     { "reindex", 'r', 1, "  -r, --reindex=name\t\tReindex all options of type index, removing gaps\n\t\t\t\tin numbering. Multiple indexes can be specified\n\t\t\t\tat the same time." },
     { "index", DEVICE_INDEX, 1, "  --index=name\t\t\tSet the index of this option within a set of\n\t\t\t\toptions. If set to a positive integer starting\n\t\t\t\tfrom zero, this option will be inserted at the\n\t\t\t\tgiven index and higher options moved one up to\n\t\t\t\tfit. If unset, or if larger than the index of\n\t\t\t\tthe last option, this option will be set as the\n\t\t\t\tlast option and others moved down to fit. If\n\t\t\t\tnegative, the option will be inserted at the\n\t\t\t\tend counting backwards." },
 #if 0
@@ -4546,7 +4548,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
     const char *key = NULL, *value = NULL;
 
     apr_status_t status;
-    int count = 0;
+    int start = 0, count;
 
     if (!args[0]) {
         /* no args is not ok */
@@ -4554,7 +4556,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
         return APR_EINVAL;
     }
 
-    if (ds->key && ds->mode == DEVICE_SET) {
+    if (ds->key && (ds->mode == DEVICE_SET || ds->mode == DEVICE_RENAME)) {
 
         apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
         int i;
@@ -4571,17 +4573,18 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             return status;
         }
         else {
-            status = device_get(ds, args[0], options, &ds->key, &ds->keypath, NULL);
+            status = device_get(ds, args[0], options, &ds->keyval, &ds->keypath, NULL);
 
             if (APR_SUCCESS != status) {
                 return status;
             }
         }
 
-        count = 2;
+        start = 2;
     }
 
     /* find the last key/value pair, or just the key if odd */
+    count = start;
     while(args[count]) {
         if (!args[count + 1]) {
             key = args[count + 0];
@@ -4729,9 +4732,33 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
 
         for (hi = apr_hash_first(ds->pool, ds->pairs); hi; hi = apr_hash_next(hi)) {
 
+        	int found = 0;
+
             apr_hash_this(hi, NULL, NULL, &v);
             pair = v;
 
+            /* skip primary key when setting but not renaming */
+            if (ds->key && ds->mode == DEVICE_SET && !strcmp(ds->key, pair->key)) {
+            	continue;
+            }
+
+            /* skip keys already seen in arguments */
+            count = start;
+            while(args[count]) {
+                if (!args[count + 1]) {
+                    break;
+                }
+            	if (!strcmp(pair->key, args[count])) {
+            		found = 1;
+            		break;
+            	}
+                count += 2;
+            }
+            if (found) {
+            	continue;
+            }
+
+            /* suggest remaining key */
             if (!key || !key[0] || !strncmp(key, pair->key, strlen(key))) {
                 apr_file_printf(ds->out, "%c%s=\n",
                         pair->optional == DEVICE_IS_OPTIONAL ? '-' : '*',
@@ -5259,6 +5286,12 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
             val = arg;
         }
 
+        if (ds->mode != DEVICE_RENAME && ds->key && !strcmp(key, ds->key)) {
+            apr_file_printf(ds->err, "'%s' cannot be modified.\n",
+                    apr_pescape_echo(ds->pool, key, 1));
+            return APR_EINVAL;
+        }
+
         status = device_parse(ds, key, val, files);
 
         if (APR_SUCCESS != status) {
@@ -5280,6 +5313,12 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
     }
 
     return status;
+}
+
+static apr_status_t device_rename(device_set_t *ds, const char **args)
+{
+
+	return device_set(ds, args);
 }
 
 static apr_status_t device_remove(device_set_t *ds, const char **args)
@@ -5837,6 +5876,11 @@ int main(int argc, const char * const argv[])
         }
         case 'm': {
             ds.mode = DEVICE_MARK;
+            ds.key = optarg;
+            break;
+        }
+        case 'n': {
+            ds.mode = DEVICE_RENAME;
             ds.key = optarg;
             break;
         }
@@ -6578,6 +6622,11 @@ int main(int argc, const char * const argv[])
                         EXIT_FAILURE, cmdline_opts);
             }
 
+            if (ds.mode == DEVICE_RENAME) {
+                return help(ds.err, argv[0], "The --rename parameter was not found on the command line.",
+                        EXIT_FAILURE, cmdline_opts);
+            }
+
             if (ds.mode == DEVICE_SET) {
                 return help(ds.err, argv[0], "The --set parameter was not found on the command line.",
                         EXIT_FAILURE, cmdline_opts);
@@ -6611,6 +6660,14 @@ int main(int argc, const char * const argv[])
     else if (ds.mode == DEVICE_REMOVE) {
 
         status = device_remove(&ds, opt->argv + opt->ind);
+
+        if (APR_SUCCESS != status) {
+            exit(1);
+        }
+    }
+    else if (ds.mode == DEVICE_RENAME) {
+
+        status = device_rename(&ds, opt->argv + opt->ind);
 
         if (APR_SUCCESS != status) {
             exit(1);

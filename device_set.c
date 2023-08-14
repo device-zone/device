@@ -3243,7 +3243,7 @@ static apr_status_t device_parse_text(device_set_t *ds, device_pair_t *pair,
     iconv_t ic = iconv_open(pair->t.format, from);
 
     if ((iconv_t)(-1) == ic) {
-    	status = errno;
+        status = errno;
         apr_file_printf(ds->err, "%s: cannot convert '%s' to '%s': %pm\n",
                 device_pescape_shell(ds->pool, pair->key), from, pair->t.format,
                 &status);
@@ -4732,14 +4732,14 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
 
         for (hi = apr_hash_first(ds->pool, ds->pairs); hi; hi = apr_hash_next(hi)) {
 
-        	int found = 0;
+            int found = 0;
 
             apr_hash_this(hi, NULL, NULL, &v);
             pair = v;
 
             /* skip primary key when setting but not renaming */
             if (ds->key && ds->mode == DEVICE_SET && !strcmp(ds->key, pair->key)) {
-            	continue;
+                continue;
             }
 
             /* skip keys already seen in arguments */
@@ -4748,14 +4748,14 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
                 if (!args[count + 1]) {
                     break;
                 }
-            	if (!strcmp(pair->key, args[count])) {
-            		found = 1;
-            		break;
-            	}
+                if (!strcmp(pair->key, args[count])) {
+                    found = 1;
+                    break;
+                }
                 count += 2;
             }
             if (found) {
-            	continue;
+                continue;
             }
 
             /* suggest remaining key */
@@ -5318,7 +5318,7 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
 static apr_status_t device_rename(device_set_t *ds, const char **args)
 {
 
-	return device_set(ds, args);
+    return device_set(ds, args);
 }
 
 static apr_status_t device_remove(device_set_t *ds, const char **args)

@@ -120,7 +120,12 @@
 #define DEVICE_URI_MAX 313
 #define DEVICE_URI_SCHEMES 314
 #define DEVICE_ADDRESS 315
-#define DEVICE_ADDRESS_LOCALPART 316
+#define DEVICE_ADDRESS_MAILBOX 316
+#define DEVICE_ADDRESS_ADDRSPEC 317
+#define DEVICE_ADDRESS_LOCALPART 318
+#define DEVICE_ADDRESS_MAX 319
+#define DEVICE_ADDRESS_NOQUOTES 320
+#define DEVICE_ADDRESS_FILESAFE 321
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -196,6 +201,13 @@ typedef struct device_set_t {
 #define DEVICE_TEXT_FORMAT_DEFAULT "UTF-8"
 #define DEVICE_URL_PATH_MAX_DEFAULT 256
 #define DEVICE_URI_MAX_DEFAULT 256
+#define DEVICE_ADDRESS_MAX_DEFAULT 256
+#define DEVICE_ADDRESS_NOQUOTES_DEFAULT 1
+#define DEVICE_ADDRESS_FILESAFE_DEFAULT 0
+
+#define DEVICE_ADDRESS_LOCAL_PART_LIMIT 64
+#define DEVICE_ADDRESS_DOMAIN_LABEL_LIMIT 63
+#define DEVICE_ADDRESS_DOMAIN_LIMIT 255
 
 typedef enum device_pair_e {
     DEVICE_PAIR_INDEX,
@@ -225,6 +237,10 @@ typedef enum device_pair_e {
     DEVICE_PAIR_URI,
     DEVICE_PAIR_URI_ABSOLUTE,
     DEVICE_PAIR_URI_RELATIVE,
+    DEVICE_PAIR_ADDRESS,
+    DEVICE_PAIR_ADDRESS_LOCALPART,
+    DEVICE_PAIR_ADDRESS_MAILBOX,
+    DEVICE_PAIR_ADDRESS_ADDRSPEC,
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -331,6 +347,12 @@ typedef struct device_pair_uri_t {
     apr_uint64_t max;
 } device_pair_uri_t;
 
+typedef struct device_pair_address_t {
+    unsigned int noquotes:1;
+    unsigned int filesafe:1;
+    apr_uint64_t max;
+} device_pair_address_t;
+
 typedef struct device_pair_t {
     const char *key;
     const char *suffix;
@@ -353,6 +375,7 @@ typedef struct device_pair_t {
         device_pair_hex_t h;
         device_pair_url_path_t up;
         device_pair_uri_t uri;
+        device_pair_address_t a;
     };
 } device_pair_t;
 
@@ -451,9 +474,16 @@ static const apr_getopt_option_t
     { "uri-maximum", DEVICE_URI_MAX, 1, "  --uri-maximum=max\t\tMaximum length used by the next URI." },
     { "uri-schemes", DEVICE_URI_SCHEMES, 1, "  --uri-schemes=s1[,s2[...]]\tSchemes accepted by the next URI." },
 #if 0
-    { "address", DEVICE_ADDRESS, 1, "  --address=name\tParse an email address." },
-    { "address-localpart", DEVICE_ADDRESS_LOCALPART, 1, "  --address-localpart=name\tParse the local part of an email address." },
+	{ "address", DEVICE_ADDRESS, 1, "  --address=name\t\tParse an email address." },
+    { "address-mailbox", DEVICE_ADDRESS_MAILBOX, 1, "  --address-mailbox=name\tParse an email address matching a mailbox." },
 #endif
+	{ "address-addrspec", DEVICE_ADDRESS_ADDRSPEC, 1, "  --address-addrspec=name\tParse an email address matching an addr-spec. This is\n\t\t\t\tthe local part, followed by '@', followed by the domain." },
+    { "address-localpart", DEVICE_ADDRESS_LOCALPART, 1, "  --address-localpart=name\tParse the local part of an email address." },
+    { "address-maximum", DEVICE_ADDRESS_MAX, 1, "  --address-maximum=max\t\tMaximum length used by the next address." },
+#if 0
+    { "address-noquotes", DEVICE_ADDRESS_NOQUOTES, 1, "  --address-noquotes=[yes|no]\tDo not allow quoted literals in email addresses." },
+#endif
+    { "address-filesafe", DEVICE_ADDRESS_FILESAFE, 1, "  --address-filesafe=[yes|no]\tDo not allow characters in email addresses that would be\n\t\t\t\tunsafe in a filename. This excludes the characters '/'\n\t\t\t\tand '\\'." },
     { NULL }
 };
 
@@ -3937,6 +3967,616 @@ static apr_status_t device_parse_uri_relative(device_set_t *ds, device_pair_t *p
     return device_parse_uri_ex(ds, pair, arg, DEVICE_URI_TARGET_RELATIVE, options, option);
 }
 
+typedef struct device_address_state_t {
+    unsigned int address:1;
+    unsigned int mailbox:1;
+    unsigned int group:1;
+    unsigned int name_addr:1;
+    unsigned int addr_spec:1;
+    unsigned int display_name:1;
+    unsigned int angle_addr:1;
+    unsigned int local_part:1;
+    unsigned int domain:1;
+    unsigned int domain_literal:1;
+    unsigned int group_list:1;
+    unsigned int mailbox_list:1;
+    unsigned int address_list:1;
+    unsigned int phrase:1;
+    unsigned int word:1;
+    unsigned int atom:1;
+    unsigned int quoted_string:1;
+    unsigned int dot_atom:1;
+    unsigned int dot_atom_text:1;
+    unsigned int dns_atom:1;
+    unsigned int seen_atext:1;
+    unsigned int seen_left_cfws:1;
+    unsigned int seen_right_cfws:1;
+    unsigned int is_ws:1;
+    unsigned int is_atext:1;
+    unsigned int is_dnstext:1;
+    unsigned int is_dot:1;
+    unsigned int is_at:1;
+    apr_size_t local_part_len;
+    apr_size_t domain_label_len;
+    apr_size_t domain_len;
+} device_address_state_t;
+
+static void want_dot_atom_text(device_address_state_t *cur)
+{
+    cur->dot_atom_text = 1;
+}
+
+static void want_dot_atom(device_address_state_t *cur)
+{
+    want_dot_atom_text(cur);
+    cur->dot_atom = 1;
+}
+
+static void want_local_part(device_address_state_t *cur)
+{
+    want_dot_atom(cur);
+    cur->local_part = 1;
+    cur->local_part_len = 0;
+}
+
+static void want_dns_atom(device_address_state_t *cur)
+{
+    cur->dns_atom = 1;
+}
+
+static void want_domain(device_address_state_t *cur)
+{
+    want_dns_atom(cur);
+    cur->domain = 1;
+    cur->domain_len = 0;
+    cur->domain_label_len = 0;
+}
+
+static void want_addr_spec(device_address_state_t *cur)
+{
+    want_local_part(cur);
+    cur->addr_spec = 1;
+}
+
+static void want_mailbox(device_address_state_t *cur)
+{
+    want_addr_spec(cur);
+    /* want_name_addr(cur); */
+    cur->mailbox = 1;
+}
+
+static void want_address(device_address_state_t *cur)
+{
+    want_mailbox(cur);
+    /* want_group(cur); */
+    cur->address = 1;
+}
+
+static int is_filesafe(char c)
+{
+    switch (c) {
+    case ':':
+    case '/':
+    case '\\':
+        return 0;
+    default:
+        return 1;
+    }
+}
+
+static int is_ws(char c)
+{
+    switch (c) {
+    case '\t':
+    case ' ':
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int is_atext(char c)
+{
+
+    switch (c) {
+    case '!':
+    case '#':
+    case '$':
+    case '%':
+    case '&':
+    case '\'':
+    case '*':
+    case '+':
+    case '-':
+    case '/':
+    case '=':
+    case '?':
+    case '^':
+    case '_':
+    case '`':
+    case '{':
+    case '|':
+    case '}':
+    case '~':
+        return 1;
+    }
+
+    if (apr_isalnum(c)) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static int is_dnstext(char c)
+{
+
+    switch (c) {
+    case '-':
+        return 1;
+    }
+
+    if (apr_isalnum(c)) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static int is_at(char c)
+{
+    switch (c) {
+    case '@':
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int is_dot(char c)
+{
+    switch (c) {
+    case '.':
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/*
+ * Address matches the parts described by 3.4 of RFC5322.
+ */
+static apr_status_t device_parse_address_ex(device_set_t *ds, device_pair_t *pair,
+        const char *arg, device_address_state_t *cur, apr_uint64_t max)
+{
+    apr_size_t len = 0;
+
+    device_address_state_t prev = { 0 };
+
+    cur->seen_atext = 0;
+    cur->seen_left_cfws = 0;
+    cur->seen_right_cfws = 0;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is missing.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    while (1) {
+        char c = arg[len++];
+
+        /* not too long? */
+        if (len >= max) {
+            /* not ok */
+            apr_file_printf(ds->err, "argument '%s': '%s' is too long (%" APR_SIZE_T_FMT " character limit).\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    apr_pescape_echo(ds->pool,
+                            apr_pstrcat(ds->pool,
+                                    apr_pstrndup(ds->pool, arg, 64), "...",
+                                    NULL), 1), max);
+            return APR_EINVAL;
+        }
+
+        /* local part too long? */
+        if (cur->local_part_len > DEVICE_ADDRESS_LOCAL_PART_LIMIT) {
+            /* not ok */
+            apr_file_printf(ds->err, "argument '%s': address local part is too long (%" APR_SIZE_T_FMT " character limit).\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    (apr_size_t)DEVICE_ADDRESS_LOCAL_PART_LIMIT);
+            return APR_EINVAL;
+        }
+
+        /* domain label too long? */
+        if (cur->domain_label_len > DEVICE_ADDRESS_DOMAIN_LABEL_LIMIT) {
+            /* not ok */
+            apr_file_printf(ds->err, "argument '%s': address domain label is too long (%" APR_SIZE_T_FMT " character limit).\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    (apr_size_t)DEVICE_ADDRESS_DOMAIN_LABEL_LIMIT);
+            return APR_EINVAL;
+        }
+
+        /* domain too long? */
+        if (cur->domain_len > DEVICE_ADDRESS_DOMAIN_LIMIT) {
+            /* not ok */
+            apr_file_printf(ds->err, "argument '%s': address domain is too long (%" APR_SIZE_T_FMT " character limit).\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    (apr_size_t)DEVICE_ADDRESS_DOMAIN_LIMIT);
+            return APR_EINVAL;
+        }
+
+        /* end of address */
+        if (c == 0) {
+            break;
+        }
+
+        prev = *cur;
+
+        /* filesafe? */
+        if (pair->a.filesafe && !is_filesafe(c)) {
+            /* not ok */
+            apr_file_printf(ds->err, "argument '%s': contains invalid character '%c'.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1), c);
+            return APR_EINVAL;
+        }
+
+        /* detect character type */
+        cur->is_ws = is_ws(c);
+        cur->is_atext = is_atext(c);
+        cur->is_dnstext = is_dnstext(c);
+        cur->is_dot = is_dot(c);
+        cur->is_at = is_at(c);
+
+        /* dot-atom-text   =   1*atext *("." 1*atext) */
+        if (cur->dot_atom_text) {
+
+            if (cur->is_atext) {
+                /* ok */
+            }
+            else if (cur->is_dot) {
+                if (!prev.is_atext) {
+                    /* dot at start or dot repeated not ok */
+                    return APR_EINVAL;
+                }
+            }
+            else {
+                if (prev.is_atext) {
+                    /* ok */
+                    cur->dot_atom_text = 0;
+                }
+                else if (prev.is_dot) {
+                    /* dot at end not ok */
+                    return APR_EINVAL;
+                }
+                else {
+                    /* empty dot_atom_text not ok */
+                    return APR_EINVAL;
+                }
+            }
+
+        }
+
+        /* dot-atom        =   [CFWS] dot-atom-text [CFWS] */
+        if (cur->dot_atom) {
+
+//            if (cur->is_ws) {
+//                /* we don't support whitespace for now */
+//                return APR_ENOTIMPL;
+//            }
+
+            if (!cur->dot_atom_text) {
+                /* our dot-atom is finished */
+                cur->dot_atom = 0;
+            }
+        }
+
+        /* local-part      =   dot-atom / quoted-string */
+        if (cur->local_part) {
+            if (!cur->dot_atom && !cur->quoted_string) {
+                cur->local_part = 0;
+            }
+            else {
+                cur->local_part_len++;
+            }
+        }
+
+        /* dns-atom   =   1*dnstext *("." 1*dnstext) */
+        if (cur->dns_atom) {
+
+            if (cur->is_dnstext) {
+                /* ok */
+                if (cur->is_dot) {
+                    cur->domain_label_len = 0;
+                }
+                else {
+                    cur->domain_label_len++;
+                }
+            }
+            else if (cur->is_dot) {
+                if (!prev.is_dnstext) {
+                    /* dot at start or dot repeated not ok */
+                    return APR_EINVAL;
+                }
+            }
+            else {
+                if (prev.is_dnstext) {
+                    /* ok */
+                    cur->dns_atom = 0;
+                }
+                else if (prev.is_dot) {
+                    /* dot at end not ok */
+                    return APR_EINVAL;
+                }
+                else {
+                    /* empty dns_atom_text not ok */
+                    return APR_EINVAL;
+                }
+            }
+
+        }
+
+        /* rfc5322#section-3.2.3 defines the liberal dot-atom */
+        /* domain          =   dot-atom / domain-literal */
+        /* rfc5321#section-2.3.5 defines the SMTP domain */
+        /* domain = dns-atom / domain-literal */
+        if (cur->domain) {
+            if (!cur->dns_atom && !cur->domain_literal) {
+                cur->domain = 0;
+            }
+            else {
+                cur->domain_len++;
+            }
+        }
+
+        /* addr-spec       =   local-part "@" domain */
+        if (cur->addr_spec) {
+
+            if (!cur->local_part && !cur->is_at && !cur->domain) {
+                /* we are no longer an addr_spec */
+                cur->addr_spec = 0;
+            }
+            else if (!cur->domain && cur->is_at) {
+                /* transition from local-part to domain */
+                want_domain(cur);
+                cur->domain_literal = 0;
+            }
+        }
+
+        /* mailbox         =   name-addr / addr-spec */
+        if (cur->mailbox) {
+            if (!cur->name_addr && !cur->addr_spec) {
+                cur->mailbox = 0;
+            }
+        }
+
+        /* address         =   mailbox / group */
+        if (cur->address) {
+            if (!cur->mailbox && !cur->group) {
+                cur->address = 0;
+                apr_file_printf(ds->err, "argument '%s': is not an address at character %" APR_SIZE_T_FMT ".\n",
+                        apr_pescape_echo(ds->pool, pair->key, 1), len);
+                return APR_EINVAL;
+            }
+        }
+
+    }
+
+    /* did the address finish early? */
+
+    /* dot-atom-text   =   1*atext *("." 1*atext) */
+    if (cur->dot_atom_text) {
+        if (cur->is_dot) {
+            /* no domain */
+            apr_file_printf(ds->err, "argument '%s': address ends with a dot.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+            return APR_EINVAL;
+        }
+
+    }
+
+    /* dns-atom   =   1*dnstext *("." 1*dnstext) */
+    if (cur->dns_atom) {
+        if (cur->is_dot) {
+            /* no domain */
+            apr_file_printf(ds->err, "argument '%s': address domain ends with a dot.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+            return APR_EINVAL;
+        }
+
+    }
+
+    /* addr-spec       =   local-part "@" domain */
+    if (cur->addr_spec) {
+
+        if (cur->local_part) {
+            /* no at symbol */
+            apr_file_printf(ds->err, "argument '%s': address is missing an '@'.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+            return APR_EINVAL;
+        }
+        else if (cur->is_at) {
+            /* no domain */
+            apr_file_printf(ds->err, "argument '%s': address is missing a domain.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1));
+            return APR_EINVAL;
+        }
+    }
+
+    return APR_SUCCESS;
+}
+
+static apr_status_t device_parse_address_localpart(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    device_address_state_t cur = { 0 };
+    apr_status_t status;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
+
+    want_local_part(&cur);
+
+    status = device_parse_address_ex(ds, pair, arg, &cur, pair->a.max);
+    if (APR_SUCCESS != status) {
+        return status;
+    }
+
+    if (!cur.address) {
+        apr_file_printf(ds->err, "argument '%s': local-part is not valid\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_EINVAL;
+    }
+
+    if (option) {
+        option[0] = arg;
+    }
+
+    return APR_SUCCESS;
+}
+
+static apr_status_t device_parse_address(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    device_address_state_t cur = { 0 };
+    apr_status_t status;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
+
+    want_address(&cur);
+
+    status = device_parse_address_ex(ds, pair, arg, &cur, pair->a.max);
+    if (APR_SUCCESS != status) {
+        return status;
+    }
+
+    if (!cur.address) {
+        apr_file_printf(ds->err, "argument '%s': address is not valid\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_EINVAL;
+    }
+
+    if (option) {
+        option[0] = arg;
+    }
+
+    return APR_SUCCESS;
+}
+
+static apr_status_t device_parse_address_mailbox(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    device_address_state_t cur = { 0 };
+    apr_status_t status;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
+
+    want_mailbox(&cur);
+
+    status = device_parse_address_ex(ds, pair, arg, &cur, pair->a.max);
+    if (APR_SUCCESS != status) {
+        return status;
+    }
+
+    if (!cur.mailbox) {
+        apr_file_printf(ds->err, "argument '%s': mailbox is not valid\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_EINVAL;
+    }
+
+    if (option) {
+        option[0] = arg;
+    }
+
+    return APR_SUCCESS;
+}
+
+static apr_status_t device_parse_address_addrspec(device_set_t *ds, device_pair_t *pair,
+        const char *arg, apr_array_header_t *options, const char **option)
+{
+    device_address_state_t cur = { 0 };
+    apr_status_t status;
+
+    if (!arg) {
+        apr_file_printf(ds->err, "argument '%s': is empty.\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_INCOMPLETE;
+    }
+
+    if (pair->optional == DEVICE_IS_REQUIRED && !arg[0]) {
+        apr_file_printf(ds->err, "'%s' is required\n", pair->key);
+        return APR_EGENERAL;
+    }
+    else if (!arg[0]) {
+        if (option) {
+            option[0] = NULL;
+        }
+        return APR_SUCCESS;
+    }
+
+    want_addr_spec(&cur);
+
+    status = device_parse_address_ex(ds, pair, arg, &cur, pair->a.max);
+    if (APR_SUCCESS != status) {
+        return status;
+    }
+
+    if (!cur.mailbox) {
+        apr_file_printf(ds->err, "argument '%s': address is not valid\n",
+                apr_pescape_echo(ds->pool, pair->key, 1));
+        return APR_EINVAL;
+    }
+
+    if (option) {
+        option[0] = arg;
+    }
+
+    return APR_SUCCESS;
+}
+
 static apr_status_t device_get(device_set_t *ds, const char *arg,
         apr_array_header_t *options, const char **option, const char **path,
         int *exact)
@@ -5105,6 +5745,18 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
         case DEVICE_PAIR_URI_RELATIVE:
             status = device_parse_uri_relative(ds, pair, val, options, &val);
             break;
+        case DEVICE_PAIR_ADDRESS:
+            status = device_parse_address(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_ADDRESS_MAILBOX:
+            status = device_parse_address_mailbox(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_ADDRESS_ADDRSPEC:
+            status = device_parse_address_addrspec(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_ADDRESS_LOCALPART:
+            status = device_parse_address_localpart(ds, pair, val, options, &val);
+            break;
         }
 
         file = apr_array_push(files);
@@ -5822,8 +6474,11 @@ int main(int argc, const char * const argv[])
     const char *text_format = DEVICE_TEXT_FORMAT_DEFAULT;
 
     apr_uint64_t url_path_max = DEVICE_URL_PATH_MAX_DEFAULT;
-
     apr_uint64_t uri_max = DEVICE_URI_MAX_DEFAULT;
+
+    apr_uint64_t address_max = DEVICE_ADDRESS_MAX_DEFAULT;
+    int address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
+    int address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
 
     /* lets get APR off the ground, and make sure it terminates cleanly */
     if (APR_SUCCESS != (status = apr_app_initialize(&argc, &argv, NULL))) {
@@ -6582,6 +7237,127 @@ int main(int argc, const char * const argv[])
             do {
                 apr_hash_set(ds.schemes, schemes, APR_HASH_KEY_STRING, schemes);
             } while ((schemes = apr_strtok(NULL, ", \t", &last)));
+
+            break;
+        }
+        case DEVICE_ADDRESS: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_ADDRESS;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->a.max = address_max;
+            pair->a.noquotes = address_noquotes;
+            pair->a.filesafe = address_filesafe;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            address_max = DEVICE_ADDRESS_MAX_DEFAULT;
+            address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
+            address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+
+            break;
+        }
+        case DEVICE_ADDRESS_MAILBOX: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_ADDRESS_MAILBOX;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->a.max = address_max;
+            pair->a.noquotes = address_noquotes;
+            pair->a.filesafe = address_filesafe;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            address_max = DEVICE_ADDRESS_MAX_DEFAULT;
+            address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
+            address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+
+            break;
+        }
+        case DEVICE_ADDRESS_ADDRSPEC: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_ADDRESS_ADDRSPEC;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->a.max = address_max;
+            pair->a.noquotes = address_noquotes;
+            pair->a.filesafe = address_filesafe;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            address_max = DEVICE_ADDRESS_MAX_DEFAULT;
+            address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
+            address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+
+            break;
+        }
+        case DEVICE_ADDRESS_LOCALPART: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_ADDRESS_LOCALPART;
+            pair->key = optarg;
+            pair->suffix = DEVICE_TXT_SUFFIX;
+            pair->optional = optional;
+            pair->a.max = address_max;
+            pair->a.noquotes = address_noquotes;
+            pair->a.filesafe = address_filesafe;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            address_max = DEVICE_ADDRESS_MAX_DEFAULT;
+            address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
+            address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+
+            break;
+        }
+        case DEVICE_ADDRESS_MAX: {
+
+            status = device_parse_uint64(&ds, optarg, &address_max);
+            if (APR_SUCCESS != status) {
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_ADDRESS_NOQUOTES: {
+
+            if (!strcmp(optarg, "yes")) {
+                address_noquotes = 1;
+            }
+            else if (!strcmp(optarg, "no")) {
+                address_noquotes = 0;
+            }
+            else {
+                apr_file_printf(ds.err, "argument '%s': is not 'yes' or 'no'.\n",
+                        apr_pescape_echo(ds.pool, optarg, 1));
+                exit(2);
+            }
+
+            break;
+        }
+        case DEVICE_ADDRESS_FILESAFE: {
+
+            if (!strcmp(optarg, "yes")) {
+                address_filesafe = 1;
+            }
+            else if (!strcmp(optarg, "no")) {
+                address_filesafe = 0;
+            }
+            else {
+                apr_file_printf(ds.err, "argument '%s': is not 'yes' or 'no'.\n",
+                        apr_pescape_echo(ds.pool, optarg, 1));
+                exit(2);
+            }
 
             break;
         }

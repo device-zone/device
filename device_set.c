@@ -4661,6 +4661,10 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
             case DEVICE_PAIR_URL_PATH_NOSCHEME:
             case DEVICE_PAIR_URL_PATH_ROOTLESS:
             case DEVICE_PAIR_URL_PATH_EMPTY:
+            case DEVICE_PAIR_ADDRESS:
+            case DEVICE_PAIR_ADDRESS_LOCALPART:
+            case DEVICE_PAIR_ADDRESS_MAILBOX:
+            case DEVICE_PAIR_ADDRESS_ADDRSPEC:
 
                 keyname = apr_pstrcat(pool, pair->key, pair->suffix, NULL);
                 if (APR_SUCCESS
@@ -4815,7 +4819,10 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
 
                 break;
 
-            default:
+            case DEVICE_PAIR_HEX:
+            case DEVICE_PAIR_URI:
+            case DEVICE_PAIR_URI_ABSOLUTE:
+            case DEVICE_PAIR_URI_RELATIVE:
                 /* support me */
                 apr_pool_destroy(pool);
                 continue;

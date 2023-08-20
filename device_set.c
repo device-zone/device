@@ -4435,7 +4435,7 @@ static apr_status_t device_parse_address_localpart(device_set_t *ds, device_pair
         return status;
     }
 
-    if (!cur.address) {
+    if (!cur.local_part) {
         apr_file_printf(ds->err, "argument '%s': local-part is not valid\n",
                 apr_pescape_echo(ds->pool, pair->key, 1));
         return APR_EINVAL;
@@ -4564,7 +4564,7 @@ static apr_status_t device_parse_address_addrspec(device_set_t *ds, device_pair_
         return status;
     }
 
-    if (!cur.mailbox) {
+    if (!cur.addr_spec) {
         apr_file_printf(ds->err, "argument '%s': address is not valid\n",
                 apr_pescape_echo(ds->pool, pair->key, 1));
         return APR_EINVAL;

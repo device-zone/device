@@ -6104,7 +6104,7 @@ static apr_status_t device_show(device_set_t *ds, const char **args)
 
     apr_status_t status = APR_SUCCESS;
 
-    int i;
+    int i, max;
 
     if (ds->key) {
 
@@ -6419,10 +6419,19 @@ static apr_status_t device_show(device_set_t *ds, const char **args)
 
     }
 
+    max = 0;
+
     for (i = 0; i < values->nelts; i++) {
         device_value_t *value = &APR_ARRAY_IDX(values, i, device_value_t);
 
-        apr_file_printf(ds->out, "%s: %s\n", value->pair->key, value->value);
+        len = strlen(value->pair->key);
+        max = max > len ? max : len;
+    }
+
+    for (i = 0; i < values->nelts; i++) {
+        device_value_t *value = &APR_ARRAY_IDX(values, i, device_value_t);
+
+        apr_file_printf(ds->out, "%*s: %s\n", max, value->pair->key, value->value);
     }
 
     return status;

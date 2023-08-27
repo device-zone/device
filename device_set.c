@@ -60,6 +60,9 @@
 #include <selinux/selinux.h>
 #include <selinux/context.h>
 #endif
+#if HAVE_LIBGEN_H
+#include <libgen.h>
+#endif
 
 #define DEVICE_OPTIONAL 257
 #define DEVICE_REQUIRED 258
@@ -6276,6 +6279,8 @@ static apr_status_t device_show(device_set_t *ds, const char **args)
 
             const char *keyname;
             apr_finfo_t finfo;
+            char target[PATH_MAX];
+            apr_ssize_t size;
 
             keyname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
 
@@ -6318,23 +6323,23 @@ static apr_status_t device_show(device_set_t *ds, const char **args)
             }
 
             /* stat the key */
-            if (APR_SUCCESS
-                    != (status = apr_stat(&finfo, keyname, APR_FINFO_LINK | APR_FINFO_TYPE | APR_FINFO_NAME,
-                            ds->pool))) {
-                apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n", pair->key,
+            if ((size = readlink(keyname, target, sizeof(target))) < 0) {
+                status = apr_get_os_error();
+                apr_file_printf(ds->err, "cannot readlink option set '%s': %pm\n", pair->key,
                         &status);
             }
 
             else {
 
-                int size = strlen(finfo.name);
-
                 if (size >= pair->s.symlink_suffix_len) {
+
+                    apr_ssize_t len = size - pair->s.symlink_suffix_len;
+                    char *buf = apr_pstrndup(ds->pool, target, len);
 
                     value = apr_array_push(values);
                     value->pair = pair;
-                    value->len = size - pair->s.symlink_suffix_len;
-                    value->value = apr_pstrndup(ds->pool, finfo.name, value->len);
+                    value->value = basename(buf);
+                    value->len = strlen(buf);
 
                 }
                 else {

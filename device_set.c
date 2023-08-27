@@ -147,6 +147,8 @@ typedef enum device_mode_e {
     DEVICE_MARK,
     DEVICE_REINDEX,
     DEVICE_RENAME,
+    DEVICE_SHOW,
+    DEVICE_LIST,
 } device_mode_e;
 
 typedef struct device_set_t {
@@ -187,12 +189,14 @@ typedef struct device_set_t {
 #define DEVICE_SELECT_NONE "none"
 #define DEVICE_SYMLINK_MAX 80
 #define DEVICE_SYMLINK_NONE "none"
+#define DEVICE_SYMLINK_ERROR "[missing]"
 #define DEVICE_SQL_IDENTIFIER_DEFAULT_MIN 1
 #define DEVICE_SQL_IDENTIFIER_DEFAULT_MAX 63
 #define DEVICE_FILE_UMASK (0x0113)
 #define DEVICE_POLAR_DEFAULT_VAL DEVICE_IS_NO
 #define DEVICE_SWITCH_DEFAULT_VAL DEVICE_IS_OFF
 #define DEVICE_RELATION_NONE "none"
+#define DEVICE_RELATION_ERROR "[missing]"
 #define DEVICE_HEX_CASE_VAL DEVICE_IS_LOWER
 #define DEVICE_HEX_WIDTH_VAL 0
 #define DEVICE_HEX_WIDTH_MAX 16
@@ -391,6 +395,12 @@ typedef struct device_file_t {
     apr_filetype_e type;
 } device_file_t;
 
+typedef struct device_value_t {
+    device_pair_t *pair;
+    const char *value;
+    apr_off_t len;
+} device_value_t;
+
 static const apr_getopt_option_t
     cmdline_opts[] =
 {
@@ -408,6 +418,10 @@ static const apr_getopt_option_t
     { "set", 's', 1, "  -s, --set=name\t\tSet an option among a set of options, named by\n\t\t\t\tthe key specified. A file called '" DEVICE_SET_MARKER "' is\n\t\t\t\tcreated to indicate that settings should be\n\t\t\t\tprocessed for update." },
     { "rename", 'n', 1, "  -n, --rename=name\t\tRename an option among a set of options, named by\n\t\t\t\tthe key specified. Other options may be set at\n\t\t\t\tthe same time. A file called '" DEVICE_SET_MARKER "' is\n\t\t\t\tcreated to indicate that settings should be\n\t\t\t\tprocessed for update." },
     { "reindex", 'r', 1, "  -r, --reindex=name\t\tReindex all options of type index, removing gaps\n\t\t\t\tin numbering. Multiple indexes can be specified\n\t\t\t\tat the same time." },
+    { "show", 'g', 1, "  -g, --show=name\t\tShow options in a set of options. To show\n\t\t\t\tunindexed options in the current directory,\n\t\t\t\tspecify '-'." },
+#if 0
+    { "list", 'l', 0, "  -l, --list\t\t\tList the options in a set of options." },
+#endif
     { "index", DEVICE_INDEX, 1, "  --index=name\t\t\tSet the index of this option within a set of\n\t\t\t\toptions. If set to a positive integer starting\n\t\t\t\tfrom zero, this option will be inserted at the\n\t\t\t\tgiven index and higher options moved one up to\n\t\t\t\tfit. If unset, or if larger than the index of\n\t\t\t\tthe last option, this option will be set as the\n\t\t\t\tlast option and others moved down to fit. If\n\t\t\t\tnegative, the option will be inserted at the\n\t\t\t\tend counting backwards." },
 #if 0
     { "unique", DEVICE_UNIQUE, 1, "  --unique=name[,name]\tForce the set of options to be unique. A search will be performed of the given options, and if found, the attempt to add or set will fail." },
@@ -474,10 +488,10 @@ static const apr_getopt_option_t
     { "uri-maximum", DEVICE_URI_MAX, 1, "  --uri-maximum=max\t\tMaximum length used by the next URI." },
     { "uri-schemes", DEVICE_URI_SCHEMES, 1, "  --uri-schemes=s1[,s2[...]]\tSchemes accepted by the next URI." },
 #if 0
-	{ "address", DEVICE_ADDRESS, 1, "  --address=name\t\tParse an email address." },
+    { "address", DEVICE_ADDRESS, 1, "  --address=name\t\tParse an email address." },
     { "address-mailbox", DEVICE_ADDRESS_MAILBOX, 1, "  --address-mailbox=name\tParse an email address matching a mailbox." },
 #endif
-	{ "address-addrspec", DEVICE_ADDRESS_ADDRSPEC, 1, "  --address-addrspec=name\tParse an email address matching an addr-spec. This is\n\t\t\t\tthe local part, followed by '@', followed by the domain." },
+    { "address-addrspec", DEVICE_ADDRESS_ADDRSPEC, 1, "  --address-addrspec=name\tParse an email address matching an addr-spec. This is\n\t\t\t\tthe local part, followed by '@', followed by the domain." },
     { "address-localpart", DEVICE_ADDRESS_LOCALPART, 1, "  --address-localpart=name\tParse the local part of an email address." },
     { "address-maximum", DEVICE_ADDRESS_MAX, 1, "  --address-maximum=max\t\tMaximum length used by the next address." },
 #if 0
@@ -866,13 +880,14 @@ static apr_status_t device_parse_index(device_set_t *ds, device_pair_t *pair,
             /* back to the beginning */
             else if (APR_SUCCESS
                     != (status = apr_file_seek(in, APR_SET, &start))) {
-                apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                apr_file_printf(ds->err, "cannot seek start of option set '%s': %pm\n", pair->key,
                         &status);
             }
 
             else {
                 int size = end + 1;
                 val = apr_palloc(pool, size);
+                val[end] = 0;
 
                 status = apr_file_gets(val, size, in);
 
@@ -1309,7 +1324,7 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
         /* back to the beginning */
         else if (APR_SUCCESS
                 != (status = apr_file_seek(in, APR_SET, &start))) {
-            apr_file_printf(ds->err, "cannot seek end of options '%s': %pm\n", pair->key,
+            apr_file_printf(ds->err, "cannot seek start of options '%s': %pm\n", pair->key,
                     &status);
         }
 
@@ -2902,13 +2917,14 @@ static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
                 /* back to the beginning */
                 else if (APR_SUCCESS
                         != (status = apr_file_seek(in, APR_SET, &start))) {
-                    apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                    apr_file_printf(ds->err, "cannot seek start of option set '%s': %pm\n", pair->key,
                             &status);
                 }
 
                 else {
                     int size = end + 1;
                     name = apr_palloc(pool, size);
+                    name[end] = 0;
 
                     status = apr_file_gets(name, size, in);
 
@@ -4692,13 +4708,14 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
                 /* back to the beginning */
                 else if (APR_SUCCESS
                         != (status = apr_file_seek(in, APR_SET, &start))) {
-                    apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                    apr_file_printf(ds->err, "cannot seek start of option set '%s': %pm\n", pair->key,
                             &status);
                 }
 
                 else {
                     int size = end + 1;
                     name = apr_palloc(pool, size);
+                    name[end] = 0;
 
                     status = apr_file_gets(name, size, in);
 
@@ -4794,13 +4811,14 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
                 /* back to the beginning */
                 else if (APR_SUCCESS
                         != (status = apr_file_seek(in, APR_SET, &start))) {
-                    apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                    apr_file_printf(ds->err, "cannot seek start of option set '%s': %pm\n", pair->key,
                             &status);
                 }
 
                 else {
                     int size = end + 1;
                     name = apr_palloc(pool, size);
+                    name[end] = 0;
 
                     status = apr_file_gets(name, size, in);
 
@@ -5245,7 +5263,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
         count += 2;
     }
 
-    if (ds->mode == DEVICE_REMOVE || ds->mode == DEVICE_MARK) {
+    if (ds->mode == DEVICE_REMOVE || ds->mode == DEVICE_MARK || ds->mode == DEVICE_SHOW) {
         if (value) {
             /* more than one arg is not ok */
             apr_file_printf(ds->err, "complete has more than one argument.\n");
@@ -5498,13 +5516,14 @@ static apr_status_t device_default_index(device_set_t *ds, device_pair_t *pair,
             /* back to the beginning */
             else if (APR_SUCCESS
                     != (status = apr_file_seek(in, APR_SET, &start))) {
-                apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                apr_file_printf(ds->err, "cannot seek start of option set '%s': %pm\n", pair->key,
                         &status);
             }
 
             else {
                 int size = end + 1;
                 val = apr_palloc(pool, size);
+                val[end] = 0;
 
                 status = apr_file_gets(val, size, in);
 
@@ -5979,6 +5998,435 @@ static apr_status_t device_rename(device_set_t *ds, const char **args)
 
     return device_set(ds, args);
 }
+// FIXME
+
+static apr_status_t device_file_open(device_set_t *ds, apr_pool_t *pool,
+        const char *key, const char *filename, apr_file_t **file,
+        apr_off_t *len)
+{
+    apr_file_t *in;
+    apr_off_t end = 0, start = 0;
+
+    apr_status_t status = APR_SUCCESS;
+
+    /* open the file */
+    if (APR_SUCCESS
+            != (status = apr_file_open(&in, filename, APR_FOPEN_READ,
+                    APR_FPROT_OS_DEFAULT, pool))) {
+        apr_file_printf(ds->err, "cannot open option '%s': %pm\n", key,
+                &status);
+    }
+
+    /* how long is the key? */
+    else if (APR_SUCCESS
+            != (status = apr_file_seek(in, APR_END, &end))) {
+        apr_file_printf(ds->err, "cannot seek end of option '%s': %pm\n", key,
+                &status);
+    }
+
+    /* back to the beginning */
+    else if (APR_SUCCESS
+            != (status = apr_file_seek(in, APR_SET, &start))) {
+        apr_file_printf(ds->err, "cannot seek start of option '%s': %pm\n", key,
+                &status);
+    }
+
+    else {
+        file[0] = in;
+        len[0] = end;
+    }
+
+    return status;
+}
+
+static apr_status_t device_file_read(device_set_t *ds, apr_pool_t *pool,
+        const char *key, const char *filename, const char **value,
+        apr_off_t *len)
+{
+    apr_file_t *in;
+
+    char *val = NULL;
+
+    apr_status_t status = APR_SUCCESS;
+
+    /* open/seek the file */
+    if (APR_SUCCESS
+            != (status = device_file_open(ds, pool, key, filename, &in, len))) {
+        /* error already handled */
+    }
+
+    else {
+        apr_off_t size = len[0] + 1;
+        val = apr_palloc(pool, size);
+        val[len[0]] = 0;
+
+        status = apr_file_gets(val, size, in);
+
+        if (APR_EOF == status) {
+            status = APR_SUCCESS;
+        }
+        if (APR_SUCCESS == status) {
+            /* short circuit, all good */
+            val = trim(val);
+        }
+        else {
+            apr_file_printf(ds->err, "cannot read option set '%s': %pm\n", key,
+                    &status);
+        }
+
+        apr_file_close(in);
+    }
+
+    if (APR_SUCCESS == status) {
+        value[0] = val;
+    }
+
+    return status;
+}
+
+static apr_status_t device_list(device_set_t *ds, const char **args)
+{
+    return APR_ENOTIMPL;
+}
+
+// FIXME
+static apr_status_t device_show(device_set_t *ds, const char **args)
+{
+    apr_hash_index_t *hi;
+    void *v;
+    device_pair_t *pair;
+    device_value_t *value;
+    const char *val;
+    apr_off_t len;
+
+    apr_array_header_t *values = apr_array_make(ds->pool,
+            16, sizeof(device_value_t));
+
+    apr_status_t status = APR_SUCCESS;
+
+    int i;
+
+    if (ds->key) {
+
+        if (!args[0] || !args[1]) {
+            apr_file_printf(ds->err, "%s is required.\n", ds->key);
+            return APR_EINVAL;
+        }
+        else {
+
+            int exact = 0;
+
+            apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+
+            status = device_get(ds, args[0], options, &ds->keyval, &ds->keypath, &exact);
+
+            if (APR_SUCCESS != status) {
+                return status;
+            }
+
+            if (!exact) {
+                apr_file_printf(ds->err, "%s was not found.\n", args[0]);
+                return APR_EINVAL;
+            }
+
+            if (APR_SUCCESS != (status = apr_filepath_set(ds->keypath, ds->pool))) {
+                apr_file_printf(ds->err, "could not show '%s' (chdir): %pm\n", ds->keyval, &status);
+                return status;
+            }
+
+        }
+
+        args += 2;
+    }
+
+    for (hi = apr_hash_first(ds->pool, ds->pairs); hi; hi = apr_hash_next(hi)) {
+
+        apr_hash_this(hi, NULL, NULL, &v);
+        pair = v;
+
+        switch (pair->type) {
+        case DEVICE_PAIR_PORT:
+        case DEVICE_PAIR_UNPRIVILEGED_PORT:
+        case DEVICE_PAIR_HOSTNAME:
+        case DEVICE_PAIR_FQDN:
+        case DEVICE_PAIR_SELECT:
+        case DEVICE_PAIR_BYTES:
+        case DEVICE_PAIR_SQL_IDENTIFIER:
+        case DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER:
+        case DEVICE_PAIR_USER:
+        case DEVICE_PAIR_DISTINGUISHED_NAME:
+        case DEVICE_PAIR_INTEGER:
+        case DEVICE_PAIR_TEXT:
+        case DEVICE_PAIR_HEX:
+        case DEVICE_PAIR_URL_PATH:
+        case DEVICE_PAIR_URL_PATH_ABEMPTY:
+        case DEVICE_PAIR_URL_PATH_ABSOLUTE:
+        case DEVICE_PAIR_URL_PATH_NOSCHEME:
+        case DEVICE_PAIR_URL_PATH_ROOTLESS:
+        case DEVICE_PAIR_URL_PATH_EMPTY:
+        case DEVICE_PAIR_URI:
+        case DEVICE_PAIR_URI_ABSOLUTE:
+        case DEVICE_PAIR_URI_RELATIVE:
+        case DEVICE_PAIR_ADDRESS:
+        case DEVICE_PAIR_ADDRESS_LOCALPART:
+        case DEVICE_PAIR_ADDRESS_MAILBOX:
+        case DEVICE_PAIR_ADDRESS_ADDRSPEC: {
+
+            const char *keyname;
+            apr_finfo_t finfo;
+
+            keyname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
+
+            /* stat the file */
+            status = apr_stat(&finfo, keyname,
+                    APR_FINFO_TYPE, ds->pool);
+            if (APR_ENOENT == status) {
+                /* missing - ignore the file */
+                break;
+            }
+            else if (APR_SUCCESS != status) {
+                apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n", pair->key,
+                        &status);
+                break;
+            }
+
+            /* open/seek/read the file */
+            if (APR_SUCCESS
+                    != (status = device_file_read(ds, ds->pool, pair->key, keyname, &val, &len))) {
+                /* error already handled */
+                break;
+            }
+
+            value = apr_array_push(values);
+            value->pair = pair;
+            value->value = val;
+            value->len = len;
+
+            break;
+        }
+        case DEVICE_PAIR_POLAR:
+        case DEVICE_PAIR_SWITCH: {
+
+            const char *keyname;
+            apr_finfo_t finfo;
+
+            keyname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
+
+            /* stat the file */
+            status = apr_stat(&finfo, keyname,
+                    APR_FINFO_TYPE, ds->pool);
+            if (APR_ENOENT == status) {
+
+                value = apr_array_push(values);
+                value->pair = pair;
+
+                switch (pair->type) {
+                case DEVICE_PAIR_POLAR:
+
+                    value->value = "no";
+                    value->len = strlen("no");
+
+                    break;
+                case DEVICE_PAIR_SWITCH:
+
+                    value->value = "off";
+                    value->len = strlen("off");
+
+                    break;
+                default:
+                    break;
+                }
+
+            }
+            else if (APR_SUCCESS == (status)) {
+
+                value = apr_array_push(values);
+                value->pair = pair;
+
+                switch (pair->type) {
+                case DEVICE_PAIR_POLAR:
+
+                    value->value = "yes";
+                    value->len = strlen("yes");
+
+                    break;
+                case DEVICE_PAIR_SWITCH:
+
+                    value->value = "on";
+                    value->len = strlen("on");
+
+                    break;
+                default:
+                    break;
+                }
+
+            }
+            else {
+                apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n", pair->key,
+                        &status);
+                break;
+            }
+
+            break;
+        }
+        case DEVICE_PAIR_INDEX:
+            /* support me */
+            break;
+        case DEVICE_PAIR_SYMLINK: {
+
+            const char *keyname;
+            apr_finfo_t finfo;
+
+            keyname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
+
+            /* stat the link */
+            status = apr_stat(&finfo, keyname,
+                    APR_FINFO_TYPE, ds->pool);
+            if (APR_ENOENT == status) {
+                /* missing - ignore the file */
+
+                value = apr_array_push(values);
+                value->pair = pair;
+
+                switch (pair->optional) {
+                case DEVICE_IS_OPTIONAL:
+
+                    value->len = strlen(DEVICE_SYMLINK_NONE);
+                    value->value = DEVICE_SYMLINK_NONE;
+
+                    break;
+                case DEVICE_IS_REQUIRED:
+
+                    value->len = strlen(DEVICE_SYMLINK_ERROR);
+                    value->value = DEVICE_SYMLINK_ERROR;
+
+                    break;
+                }
+
+                break;
+            }
+            else if (finfo.filetype != APR_LNK) {
+                apr_file_printf(ds->err,
+                        "option set '%s': link expected, ignoring\n",
+                        pair->key);
+                break;
+            }
+            else if (APR_SUCCESS != status) {
+                apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n", pair->key,
+                        &status);
+                break;
+            }
+
+            /* stat the key */
+            if (APR_SUCCESS
+                    != (status = apr_stat(&finfo, keyname, APR_FINFO_LINK | APR_FINFO_TYPE | APR_FINFO_NAME,
+                            ds->pool))) {
+                apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n", pair->key,
+                        &status);
+            }
+
+            else {
+
+                int size = strlen(finfo.name);
+
+                if (size >= pair->s.symlink_suffix_len) {
+
+                    value = apr_array_push(values);
+                    value->pair = pair;
+                    value->len = size - pair->s.symlink_suffix_len;
+                    value->value = apr_pstrndup(ds->pool, finfo.name, value->len);
+
+                }
+                else {
+                    apr_file_printf(ds->err, "option set '%s' does not have suffix: %s\n", pair->key,
+                            pair->s.symlink_suffix);
+                    status = APR_EGENERAL;
+                }
+
+            }
+
+            break;
+
+        }
+        case DEVICE_PAIR_RELATION: {
+
+            const char *keyname;
+            const char *relname;
+            char *relpath;
+            apr_finfo_t finfo;
+
+            keyname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
+
+            /* stat the file */
+            status = apr_stat(&finfo, keyname,
+                    APR_FINFO_TYPE, ds->pool);
+            if (APR_ENOENT == status) {
+                /* missing - optional or error */
+
+                value = apr_array_push(values);
+                value->pair = pair;
+
+                switch (pair->optional) {
+                case DEVICE_IS_OPTIONAL:
+
+                    value->len = strlen(DEVICE_RELATION_NONE);
+                    value->value = DEVICE_RELATION_NONE;
+
+                    break;
+                case DEVICE_IS_REQUIRED:
+
+                    value->len = strlen(DEVICE_RELATION_ERROR);
+                    value->value = DEVICE_RELATION_ERROR;
+
+                    break;
+                }
+
+                break;
+            }
+            else if (APR_SUCCESS != status) {
+                apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n", pair->key,
+                        &status);
+                break;
+            }
+
+            relname = apr_pstrcat(ds->pool, pair->r.relation_name,
+                    pair->r.relation_suffix, NULL);
+
+            /* find relation */
+            if (APR_SUCCESS
+                    != (status = apr_filepath_merge(&relpath, keyname,
+                            relname, APR_FILEPATH_NOTABSOLUTE, ds->pool))) {
+                apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                        &status);
+            }
+
+            /* open/seek/read the file */
+            else if (APR_SUCCESS
+                    != (status = device_file_read(ds, ds->pool, pair->key, relpath, &val, &len))) {
+                /* error already handled */
+                break;
+            }
+
+            value = apr_array_push(values);
+            value->pair = pair;
+            value->value = val;
+            value->len = len;
+
+            break;
+
+        }
+        }
+
+    }
+
+    for (i = 0; i < values->nelts; i++) {
+        device_value_t *value = &APR_ARRAY_IDX(values, i, device_value_t);
+
+        apr_file_printf(ds->out, "%s: %s\n", value->pair->key, value->value);
+    }
+
+    return status;
+}
 
 static apr_status_t device_remove(device_set_t *ds, const char **args)
 {
@@ -6300,13 +6748,14 @@ static apr_status_t device_reindex(device_set_t *ds, const char **args)
                     /* back to the beginning */
                     else if (APR_SUCCESS
                             != (status = apr_file_seek(in, APR_SET, &start))) {
-                        apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
+                        apr_file_printf(ds->err, "cannot seek start of option set '%s': %pm\n", pair->key,
                                 &status);
                     }
 
                     else {
                         int size = end + 1;
                         val = apr_palloc(pool, size);
+                        val[end] = 0;
 
                         status = apr_file_gets(val, size, in);
 
@@ -6562,6 +7011,17 @@ int main(int argc, const char * const argv[])
         case 's': {
             ds.mode = DEVICE_SET;
             ds.key = optarg;
+            break;
+        }
+        case 'g': {
+            ds.mode = DEVICE_SHOW;
+            if (optarg[0] != '-') {
+                ds.key = optarg;
+            }
+            break;
+        }
+        case 'l': {
+            ds.mode = DEVICE_LIST;
             break;
         }
         case 'v': {
@@ -7467,6 +7927,22 @@ int main(int argc, const char * const argv[])
     else if (ds.mode == DEVICE_REINDEX) {
 
         status = device_reindex(&ds, opt->argv + opt->ind);
+
+        if (APR_SUCCESS != status) {
+            exit(1);
+        }
+    }
+    else if (ds.mode == DEVICE_SHOW) {
+
+        status = device_show(&ds, opt->argv + opt->ind);
+
+        if (APR_SUCCESS != status) {
+            exit(1);
+        }
+    }
+    else if (ds.mode == DEVICE_LIST) {
+
+        status = device_list(&ds, opt->argv + opt->ind);
 
         if (APR_SUCCESS != status) {
             exit(1);

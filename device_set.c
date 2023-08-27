@@ -6281,7 +6281,7 @@ static apr_status_t device_show(device_set_t *ds, const char **args)
 
             /* stat the link */
             status = apr_stat(&finfo, keyname,
-                    APR_FINFO_TYPE, ds->pool);
+                    APR_FINFO_LINK | APR_FINFO_TYPE, ds->pool);
             if (APR_ENOENT == status) {
                 /* missing - ignore the file */
 
@@ -6359,7 +6359,7 @@ static apr_status_t device_show(device_set_t *ds, const char **args)
 
             /* stat the file */
             status = apr_stat(&finfo, keyname,
-                    APR_FINFO_TYPE, ds->pool);
+                    APR_FINFO_LINK | APR_FINFO_TYPE, ds->pool);
             if (APR_ENOENT == status) {
                 /* missing - optional or error */
 

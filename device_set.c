@@ -129,6 +129,9 @@
 #define DEVICE_ADDRESS_MAX 319
 #define DEVICE_ADDRESS_NOQUOTES 320
 #define DEVICE_ADDRESS_FILESAFE 321
+#define DEVICE_FLAG 322
+#define DEVICE_SHOW_FLAGS 323
+#define DEVICE_SHOW_TABLE 324
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -169,6 +172,8 @@ typedef struct device_set_t {
     apr_array_header_t *select_bases;
     apr_array_header_t *symlink_bases;
     apr_array_header_t *relation_bases;
+    apr_array_header_t *show_flags;
+    apr_array_header_t *show_table;
     const char *symlink_suffix;
     int symlink_suffix_len;
     const char *symlink_context_type;
@@ -320,10 +325,12 @@ typedef struct device_pair_users_t {
 } device_pair_users_t;
 
 typedef struct device_pair_polars_t {
+    const char *flag;
     device_polar_e polar_default;
 } device_pair_polars_t;
 
 typedef struct device_pair_switches_t {
+    const char *flag;
     device_switch_e switch_default;
 } device_pair_switches_t;
 
@@ -363,6 +370,7 @@ typedef struct device_pair_address_t {
 typedef struct device_pair_t {
     const char *key;
     const char *suffix;
+    const char *flag;
     device_pair_e type;
     device_optional_e optional;
     device_unique_e unique;
@@ -402,7 +410,26 @@ typedef struct device_value_t {
     device_pair_t *pair;
     const char *value;
     apr_off_t len;
+    int set:1;
 } device_value_t;
+
+typedef struct device_values_t {
+    apr_array_header_t *values;
+    apr_int64_t order;
+} device_values_t;
+
+typedef struct device_table_t {
+    device_pair_t *pair;
+    apr_array_header_t *values;
+    const char *flag;
+    int max;
+} device_table_t;
+
+typedef struct device_row_t {
+    apr_array_header_t *flags;
+    apr_array_header_t *values;
+    apr_int64_t order;
+} device_row_t;
 
 static const apr_getopt_option_t
     cmdline_opts[] =
@@ -501,6 +528,9 @@ static const apr_getopt_option_t
     { "address-noquotes", DEVICE_ADDRESS_NOQUOTES, 1, "  --address-noquotes=[yes|no]\tDo not allow quoted literals in email addresses." },
 #endif
     { "address-filesafe", DEVICE_ADDRESS_FILESAFE, 1, "  --address-filesafe=[yes|no]\tDo not allow characters in email addresses that would be\n\t\t\t\tunsafe in a filename. This excludes the characters '/'\n\t\t\t\tand '\\'." },
+    { "flag", DEVICE_FLAG, 1, "  --flag=chars\tWhen showing a table, use the specified character(s) to indicate the flag is set." },
+    { "show-flags", DEVICE_SHOW_FLAGS, 1, "  --show-flags=name[,name...]\tWhen showing a table, show the specified polars or switches as flags." },
+    { "show-table", DEVICE_SHOW_TABLE, 1, "  --show-table=name[,name...]\tWhen showing a table, show the specified entries in the given order." },
     { NULL }
 };
 
@@ -754,6 +784,13 @@ static int files_desc(const void *a, const void *b)
     const device_file_t *fa = a, *fb = b;
 
     return fb->order - fa->order;
+}
+
+static int values_asc(const void *a, const void *b)
+{
+    const device_value_t *va = a, *vb = b;
+
+    return strcmp(va->pair->key, vb->pair->key);
 }
 
 static const char * device_hash_to_string(apr_pool_t *pool, apr_hash_t *hash)
@@ -6087,19 +6124,592 @@ static apr_status_t device_file_read(device_set_t *ds, apr_pool_t *pool,
     return status;
 }
 
-static apr_status_t device_list(device_set_t *ds, const char **args)
+static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
+        const char *keypath, apr_array_header_t *values, apr_int64_t *order,
+        int *max)
 {
-    return APR_ENOTIMPL;
+    char *path;
+    device_value_t *value;
+    const char *val;
+    apr_off_t len;
+
+    apr_status_t status;
+
+    switch (pair->type) {
+    case DEVICE_PAIR_PORT:
+    case DEVICE_PAIR_UNPRIVILEGED_PORT:
+    case DEVICE_PAIR_HOSTNAME:
+    case DEVICE_PAIR_FQDN:
+    case DEVICE_PAIR_SELECT:
+    case DEVICE_PAIR_BYTES:
+    case DEVICE_PAIR_SQL_IDENTIFIER:
+    case DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER:
+    case DEVICE_PAIR_USER:
+    case DEVICE_PAIR_DISTINGUISHED_NAME:
+    case DEVICE_PAIR_INTEGER:
+    case DEVICE_PAIR_TEXT:
+    case DEVICE_PAIR_HEX:
+    case DEVICE_PAIR_URL_PATH:
+    case DEVICE_PAIR_URL_PATH_ABEMPTY:
+    case DEVICE_PAIR_URL_PATH_ABSOLUTE:
+    case DEVICE_PAIR_URL_PATH_NOSCHEME:
+    case DEVICE_PAIR_URL_PATH_ROOTLESS:
+    case DEVICE_PAIR_URL_PATH_EMPTY:
+    case DEVICE_PAIR_URI:
+    case DEVICE_PAIR_URI_ABSOLUTE:
+    case DEVICE_PAIR_URI_RELATIVE:
+    case DEVICE_PAIR_ADDRESS:
+    case DEVICE_PAIR_ADDRESS_LOCALPART:
+    case DEVICE_PAIR_ADDRESS_MAILBOX:
+    case DEVICE_PAIR_ADDRESS_ADDRSPEC: {
+
+        const char *keyname;
+        apr_finfo_t finfo;
+
+        keyname = path = apr_pstrcat(ds->pool, pair->key, pair->suffix,
+        NULL);
+        if (keypath
+                && APR_SUCCESS
+                        != (status = apr_filepath_merge(&path, keypath, keyname,
+                                APR_FILEPATH_NOTABSOLUTE, ds->pool))) {
+            apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n",
+                    pair->key, &status);
+            break;
+        }
+
+        /* stat the file */
+        status = apr_stat(&finfo, path,
+        APR_FINFO_TYPE, ds->pool);
+        if (APR_ENOENT == status) {
+            /* missing - ignore the file */
+            break;
+        } else if (APR_SUCCESS != status) {
+            apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n",
+                    pair->key, &status);
+            break;
+        }
+
+        /* open/seek/read the file */
+        if (APR_SUCCESS
+                != (status = device_file_read(ds, ds->pool, pair->key, path,
+                        &val, &len))) {
+            /* error already handled */
+            break;
+        }
+
+        value = apr_array_push(values);
+        value->pair = pair;
+        value->value = val;
+        value->len = len;
+        value->set = 1;
+
+        max[0] = max[0] > value->len ? max[0] : value->len;
+
+        break;
+    }
+    case DEVICE_PAIR_POLAR:
+    case DEVICE_PAIR_SWITCH: {
+
+        const char *keyname;
+        apr_finfo_t finfo;
+
+        keyname = path = apr_pstrcat(ds->pool, pair->key, pair->suffix,
+        NULL);
+        if (keypath
+                && APR_SUCCESS
+                        != (status = apr_filepath_merge(&path, keypath, keyname,
+                                APR_FILEPATH_NOTABSOLUTE, ds->pool))) {
+            apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n",
+                    pair->key, &status);
+            break;
+        }
+
+        /* stat the file */
+        status = apr_stat(&finfo, path,
+        APR_FINFO_TYPE, ds->pool);
+        if (APR_ENOENT == status) {
+
+            value = apr_array_push(values);
+            value->pair = pair;
+
+            switch (pair->type) {
+            case DEVICE_PAIR_POLAR:
+
+                value->value = "no";
+                value->len = strlen("no");
+
+                break;
+            case DEVICE_PAIR_SWITCH:
+
+                value->value = "off";
+                value->len = strlen("off");
+
+                break;
+            default:
+                break;
+            }
+
+            max[0] = max[0] > value->len ? max[0] : value->len;
+
+        } else if (APR_SUCCESS == (status)) {
+
+            value = apr_array_push(values);
+            value->pair = pair;
+
+            switch (pair->type) {
+            case DEVICE_PAIR_POLAR:
+
+                value->value = "yes";
+                value->len = strlen("yes");
+                value->set = 1;
+
+                break;
+            case DEVICE_PAIR_SWITCH:
+
+                value->value = "on";
+                value->len = strlen("on");
+                value->set = 1;
+
+                break;
+            default:
+                break;
+            }
+
+            max[0] = max[0] > value->len ? max[0] : value->len;
+
+        } else {
+            apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n",
+                    pair->key, &status);
+            break;
+        }
+
+        break;
+    }
+    case DEVICE_PAIR_INDEX: {
+
+        const char *keyname;
+        apr_finfo_t finfo;
+        char *end;
+
+        if (!order) {
+            status = APR_ENOENT;
+            break;
+        }
+
+        keyname = path = apr_pstrcat(ds->pool, pair->key, pair->suffix,
+        NULL);
+        if (keypath
+                && APR_SUCCESS
+                        != (status = apr_filepath_merge(&path, keypath, keyname,
+                                APR_FILEPATH_NOTABSOLUTE, ds->pool))) {
+            apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n",
+                    pair->key, &status);
+            break;
+        }
+
+        /* stat the file */
+        status = apr_stat(&finfo, path,
+        APR_FINFO_TYPE, ds->pool);
+        if (APR_ENOENT == status) {
+            /* missing - ignore the file */
+            break;
+        } else if (APR_SUCCESS != status) {
+            apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n",
+                    pair->key, &status);
+            break;
+        }
+
+        /* open/seek/read the file */
+        if (APR_SUCCESS
+                != (status = device_file_read(ds, ds->pool, pair->key, path,
+                        &val, &len))) {
+            /* error already handled */
+            break;
+        }
+
+        order[0] = apr_strtoi64(val, &end, 10);
+        if (end[0] || errno == ERANGE) {
+            apr_file_printf(ds->err,
+                    "argument '%s': '%s' is not a valid index, ignoring.\n",
+                    apr_pescape_echo(ds->pool, pair->key, 1),
+                    apr_pescape_echo(ds->pool, val, 1));
+            /* ignore and loop round */
+        }
+
+        break;
+    }
+    case DEVICE_PAIR_SYMLINK: {
+
+        const char *keyname;
+        apr_finfo_t finfo;
+        char target[PATH_MAX];
+        apr_ssize_t size;
+
+        keyname = path = apr_pstrcat(ds->pool, pair->key, pair->suffix,
+        NULL);
+        if (keypath
+                && APR_SUCCESS
+                        != (status = apr_filepath_merge(&path, keypath, keyname,
+                                APR_FILEPATH_NOTABSOLUTE, ds->pool))) {
+            apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n",
+                    pair->key, &status);
+            break;
+        }
+
+        /* stat the link */
+        status = apr_stat(&finfo, path,
+        APR_FINFO_LINK | APR_FINFO_TYPE, ds->pool);
+        if (APR_ENOENT == status) {
+            /* missing - ignore the file */
+            status = APR_SUCCESS;
+
+            value = apr_array_push(values);
+            value->pair = pair;
+
+            switch (pair->optional) {
+            case DEVICE_IS_OPTIONAL:
+
+                value->len = strlen(DEVICE_SYMLINK_NONE);
+                value->value = DEVICE_SYMLINK_NONE;
+
+                break;
+            case DEVICE_IS_REQUIRED:
+
+                value->len = strlen(DEVICE_SYMLINK_ERROR);
+                value->value = DEVICE_SYMLINK_ERROR;
+
+                break;
+            }
+
+            max[0] = max[0] > value->len ? max[0] : value->len;
+
+            break;
+        } else if (finfo.filetype != APR_LNK) {
+            apr_file_printf(ds->err,
+                    "option set '%s': link expected, ignoring\n", pair->key);
+            break;
+        } else if (APR_SUCCESS != status) {
+            apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n",
+                    pair->key, &status);
+            break;
+        }
+
+        /* stat the key */
+        if ((size = readlink(path, target, sizeof(target))) < 0) {
+            status = apr_get_os_error();
+            apr_file_printf(ds->err, "cannot readlink option set '%s': %pm\n",
+                    pair->key, &status);
+        }
+
+        else {
+
+            if (size >= pair->s.symlink_suffix_len) {
+
+                apr_ssize_t len = size - pair->s.symlink_suffix_len;
+                char *buf = apr_pstrndup(ds->pool, target, len);
+
+                value = apr_array_push(values);
+                value->pair = pair;
+                value->value = basename(buf);
+                value->len = strlen(buf);
+                value->set = 1;
+
+                max[0] = max[0] > value->len ? max[0] : value->len;
+
+            } else {
+                apr_file_printf(ds->err,
+                        "option set '%s' does not have suffix: %s\n", pair->key,
+                        pair->s.symlink_suffix);
+                status = APR_EGENERAL;
+            }
+
+        }
+
+        break;
+
+    }
+    case DEVICE_PAIR_RELATION: {
+
+        const char *keyname;
+        const char *relname;
+        char *relpath;
+        apr_finfo_t finfo;
+
+        keyname = path = apr_pstrcat(ds->pool, pair->key, pair->suffix,
+        NULL);
+        if (keypath
+                && APR_SUCCESS
+                        != (status = apr_filepath_merge(&path, keypath, keyname,
+                                APR_FILEPATH_NOTABSOLUTE, ds->pool))) {
+            apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n",
+                    pair->key, &status);
+            break;
+        }
+
+        /* stat the file */
+        status = apr_stat(&finfo, path,
+        APR_FINFO_LINK | APR_FINFO_TYPE, ds->pool);
+        if (APR_ENOENT == status) {
+            /* missing - optional or error */
+
+            value = apr_array_push(values);
+            value->pair = pair;
+
+            switch (pair->optional) {
+            case DEVICE_IS_OPTIONAL:
+
+                value->len = strlen(DEVICE_RELATION_NONE);
+                value->value = DEVICE_RELATION_NONE;
+
+                break;
+            case DEVICE_IS_REQUIRED:
+
+                value->len = strlen(DEVICE_RELATION_ERROR);
+                value->value = DEVICE_RELATION_ERROR;
+
+                break;
+            }
+
+            max[0] = max[0] > value->len ? max[0] : value->len;
+
+            break;
+        } else if (APR_SUCCESS != status) {
+            apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n",
+                    pair->key, &status);
+            break;
+        }
+
+        relname = apr_pstrcat(ds->pool, pair->r.relation_name,
+                pair->r.relation_suffix, NULL);
+
+        /* find relation */
+        if (APR_SUCCESS
+                != (status = apr_filepath_merge(&relpath, path, relname,
+                        APR_FILEPATH_NOTABSOLUTE, ds->pool))) {
+            apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n",
+                    pair->key, &status);
+            break;
+        }
+
+        /* open/seek/read the file */
+        else if (APR_SUCCESS
+                != (status = device_file_read(ds, ds->pool, pair->key, relpath,
+                        &val, &len))) {
+            /* error already handled */
+            break;
+        }
+
+        value = apr_array_push(values);
+        value->pair = pair;
+        value->value = val;
+        value->len = len;
+        value->set = 1;
+
+        max[0] = max[0] > value->len ? max[0] : value->len;
+
+        break;
+
+    }
+    }
+
+    return status;
 }
 
-// FIXME
+static apr_status_t device_list(device_set_t *ds, const char **args)
+{
+    apr_dir_t *thedir;
+    apr_finfo_t dirent;
+    device_table_t *table;
+    device_row_t *row;
+    device_value_t *value;
+
+    char *upper;
+
+    apr_array_header_t *rows = apr_array_make(ds->pool,
+            16, sizeof(device_row_t));
+
+    apr_status_t status = APR_SUCCESS;
+
+    int i, j, k;
+
+    if (!ds->show_table) {
+        apr_file_printf(ds->err, "Name to show was not specified.\n");
+        return APR_EINVAL;
+    }
+
+    /* scan the directories to create our list */
+    if ((status = apr_dir_open(&thedir, ".", ds->pool)) != APR_SUCCESS) {
+        /* could not open directory, fail */
+        apr_file_printf(ds->err, "could not open current directory: %pm\n", &status);
+        return status;
+    }
+
+    do {
+
+        status = apr_dir_read(&dirent,
+                APR_FINFO_TYPE | APR_FINFO_NAME | APR_FINFO_WPROT, thedir);
+        if (APR_STATUS_IS_INCOMPLETE(status)) {
+            continue; /* ignore un-stat()able files */
+        } else if (status != APR_SUCCESS) {
+            break;
+        }
+
+        /* hidden files are ignored */
+        if (dirent.name[0] == '.') {
+            continue;
+        }
+
+        switch (dirent.filetype) {
+        case APR_DIR: {
+
+            row = apr_array_push(rows);
+            row->flags = apr_array_make(ds->pool, 16, sizeof(device_value_t));
+            row->values = apr_array_make(ds->pool, 16, sizeof(device_value_t));
+
+            // FIXME - index
+
+            for (i = 0; i < ds->show_flags->nelts; i++) {
+                table = &APR_ARRAY_IDX(ds->show_flags, i, device_table_t);
+
+                status = device_value(ds, table->pair, dirent.name, row->flags, &row->order, &table->max);
+
+                if (APR_SUCCESS != status) {
+                    device_value_t *value;
+                    value = apr_array_push(row->flags);
+                    value->pair = table->pair;
+                    value->value = "";
+                    value->len = 0;
+                }
+
+            }
+
+
+            for (i = 0; i < ds->show_table->nelts; i++) {
+                table = &APR_ARRAY_IDX(ds->show_table, i, device_table_t);
+
+                status = device_value(ds, table->pair, dirent.name, row->values, &row->order, &table->max);
+
+                if (APR_SUCCESS != status) {
+                    device_value_t *value;
+                    value = apr_array_push(row->values);
+                    value->pair = table->pair;
+                    value->value = "";
+                    value->len = 0;
+                }
+
+            }
+
+            break;
+        }
+        default:
+            break;
+        }
+
+    } while (1);
+
+    apr_dir_close(thedir);
+
+    /* flags summary row */
+    if (ds->show_flags->nelts) {
+        apr_file_puts("Flags: ", ds->out);
+        for (j = 0; j < ds->show_flags->nelts; j++) {
+
+            table = &APR_ARRAY_IDX(ds->show_flags, j, device_table_t);
+
+            if (j) {
+                apr_file_puts(",", ds->out);
+            }
+
+            if (table->pair->flag) {
+                apr_file_printf(ds->out, "%s (%s)", table->pair->key, table->pair->flag);
+            } else {
+                apr_file_printf(ds->out, "%s", table->pair->key);
+            }
+
+        }
+        apr_file_puts("\n", ds->out);
+    }
+
+    /* flags header row */
+    if (ds->show_flags->nelts) {
+        for (j = 0; j < ds->show_flags->nelts; j++) {
+
+            table = &APR_ARRAY_IDX(ds->show_flags, j, device_table_t);
+
+            if (table->pair->flag) {
+                apr_file_printf(ds->out, "%*s", (int)strlen(table->pair->flag), "");
+            } else {
+                apr_file_puts(" ", ds->out);
+            }
+
+        }
+        apr_file_puts(" ", ds->out);
+    }
+
+    /* values header row */
+    for (j = 0; j < ds->show_table->nelts; j++) {
+
+        table = &APR_ARRAY_IDX(ds->show_table, j, device_table_t);
+
+        upper = apr_pstrdup(ds->pool, table->pair->key);
+        for (k = 0; upper[k]; k++) {
+            upper[k] = apr_toupper(upper[k]);
+        }
+
+        apr_file_printf(ds->out, "%*s  ", table->max, upper);
+
+    }
+    apr_file_puts("\n", ds->out);
+
+    /* rows */
+    for (i = 0; i < rows->nelts; i++) {
+        row = &APR_ARRAY_IDX(rows, i, device_row_t);
+
+        for (j = 0; j < row->flags->nelts && j < ds->show_flags->nelts; j++) {
+            table = &APR_ARRAY_IDX(ds->show_flags, j, device_table_t);
+            value = &APR_ARRAY_IDX(row->flags, j, device_value_t);
+
+            if (value->set) {
+                if (table->pair->flag) {
+                    apr_file_printf(ds->out, "%*s", (int)strlen(table->pair->flag),
+                            table->pair->flag);
+                } else {
+                    apr_file_puts(".", ds->out);
+                }
+            }
+            else {
+                if (table->pair->flag) {
+                    apr_file_printf(ds->out, "%*s", (int)strlen(table->pair->flag),
+                            "");
+                } else {
+                    apr_file_puts(" ", ds->out);
+                }
+            }
+
+        }
+        if (ds->show_flags->nelts) {
+            apr_file_puts(" ", ds->out);
+        }
+
+        for (j = 0; j < row->values->nelts && j < ds->show_table->nelts; j++) {
+            table = &APR_ARRAY_IDX(ds->show_table, j, device_table_t);
+            value = &APR_ARRAY_IDX(row->values, j, device_value_t);
+
+            apr_file_printf(ds->out, "%*s  ", table->max, value->value);
+
+        }
+        apr_file_puts("\n", ds->out);
+
+    }
+
+    return APR_SUCCESS;
+}
+
 static apr_status_t device_show(device_set_t *ds, const char **args)
 {
     apr_hash_index_t *hi;
     void *v;
     device_pair_t *pair;
-    device_value_t *value;
-    const char *val;
     apr_off_t len;
 
     apr_array_header_t *values = apr_array_make(ds->pool,
@@ -6112,8 +6722,10 @@ static apr_status_t device_show(device_set_t *ds, const char **args)
     if (ds->key) {
 
         if (!args[0] || !args[1]) {
-            apr_file_printf(ds->err, "%s is required.\n", ds->key);
-            return APR_EINVAL;
+
+            /* no args gives full list */
+            return device_list(ds, args);
+
         }
         else {
 
@@ -6132,11 +6744,6 @@ static apr_status_t device_show(device_set_t *ds, const char **args)
                 return APR_EINVAL;
             }
 
-            if (APR_SUCCESS != (status = apr_filepath_set(ds->keypath, ds->pool))) {
-                apr_file_printf(ds->err, "could not show '%s' (chdir): %pm\n", ds->keyval, &status);
-                return status;
-            }
-
         }
 
         args += 2;
@@ -6147,284 +6754,14 @@ static apr_status_t device_show(device_set_t *ds, const char **args)
         apr_hash_this(hi, NULL, NULL, &v);
         pair = v;
 
-        switch (pair->type) {
-        case DEVICE_PAIR_PORT:
-        case DEVICE_PAIR_UNPRIVILEGED_PORT:
-        case DEVICE_PAIR_HOSTNAME:
-        case DEVICE_PAIR_FQDN:
-        case DEVICE_PAIR_SELECT:
-        case DEVICE_PAIR_BYTES:
-        case DEVICE_PAIR_SQL_IDENTIFIER:
-        case DEVICE_PAIR_SQL_DELIMITED_IDENTIFIER:
-        case DEVICE_PAIR_USER:
-        case DEVICE_PAIR_DISTINGUISHED_NAME:
-        case DEVICE_PAIR_INTEGER:
-        case DEVICE_PAIR_TEXT:
-        case DEVICE_PAIR_HEX:
-        case DEVICE_PAIR_URL_PATH:
-        case DEVICE_PAIR_URL_PATH_ABEMPTY:
-        case DEVICE_PAIR_URL_PATH_ABSOLUTE:
-        case DEVICE_PAIR_URL_PATH_NOSCHEME:
-        case DEVICE_PAIR_URL_PATH_ROOTLESS:
-        case DEVICE_PAIR_URL_PATH_EMPTY:
-        case DEVICE_PAIR_URI:
-        case DEVICE_PAIR_URI_ABSOLUTE:
-        case DEVICE_PAIR_URI_RELATIVE:
-        case DEVICE_PAIR_ADDRESS:
-        case DEVICE_PAIR_ADDRESS_LOCALPART:
-        case DEVICE_PAIR_ADDRESS_MAILBOX:
-        case DEVICE_PAIR_ADDRESS_ADDRSPEC: {
-
-            const char *keyname;
-            apr_finfo_t finfo;
-
-            keyname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
-
-            /* stat the file */
-            status = apr_stat(&finfo, keyname,
-                    APR_FINFO_TYPE, ds->pool);
-            if (APR_ENOENT == status) {
-                /* missing - ignore the file */
-                break;
-            }
-            else if (APR_SUCCESS != status) {
-                apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n", pair->key,
-                        &status);
-                break;
-            }
-
-            /* open/seek/read the file */
-            if (APR_SUCCESS
-                    != (status = device_file_read(ds, ds->pool, pair->key, keyname, &val, &len))) {
-                /* error already handled */
-                break;
-            }
-
-            value = apr_array_push(values);
-            value->pair = pair;
-            value->value = val;
-            value->len = len;
-
-            break;
-        }
-        case DEVICE_PAIR_POLAR:
-        case DEVICE_PAIR_SWITCH: {
-
-            const char *keyname;
-            apr_finfo_t finfo;
-
-            keyname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
-
-            /* stat the file */
-            status = apr_stat(&finfo, keyname,
-                    APR_FINFO_TYPE, ds->pool);
-            if (APR_ENOENT == status) {
-
-                value = apr_array_push(values);
-                value->pair = pair;
-
-                switch (pair->type) {
-                case DEVICE_PAIR_POLAR:
-
-                    value->value = "no";
-                    value->len = strlen("no");
-
-                    break;
-                case DEVICE_PAIR_SWITCH:
-
-                    value->value = "off";
-                    value->len = strlen("off");
-
-                    break;
-                default:
-                    break;
-                }
-
-            }
-            else if (APR_SUCCESS == (status)) {
-
-                value = apr_array_push(values);
-                value->pair = pair;
-
-                switch (pair->type) {
-                case DEVICE_PAIR_POLAR:
-
-                    value->value = "yes";
-                    value->len = strlen("yes");
-
-                    break;
-                case DEVICE_PAIR_SWITCH:
-
-                    value->value = "on";
-                    value->len = strlen("on");
-
-                    break;
-                default:
-                    break;
-                }
-
-            }
-            else {
-                apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n", pair->key,
-                        &status);
-                break;
-            }
-
-            break;
-        }
-        case DEVICE_PAIR_INDEX:
-            /* support me */
-            break;
-        case DEVICE_PAIR_SYMLINK: {
-
-            const char *keyname;
-            apr_finfo_t finfo;
-            char target[PATH_MAX];
-            apr_ssize_t size;
-
-            keyname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
-
-            /* stat the link */
-            status = apr_stat(&finfo, keyname,
-                    APR_FINFO_LINK | APR_FINFO_TYPE, ds->pool);
-            if (APR_ENOENT == status) {
-                /* missing - ignore the file */
-
-                value = apr_array_push(values);
-                value->pair = pair;
-
-                switch (pair->optional) {
-                case DEVICE_IS_OPTIONAL:
-
-                    value->len = strlen(DEVICE_SYMLINK_NONE);
-                    value->value = DEVICE_SYMLINK_NONE;
-
-                    break;
-                case DEVICE_IS_REQUIRED:
-
-                    value->len = strlen(DEVICE_SYMLINK_ERROR);
-                    value->value = DEVICE_SYMLINK_ERROR;
-
-                    break;
-                }
-
-                break;
-            }
-            else if (finfo.filetype != APR_LNK) {
-                apr_file_printf(ds->err,
-                        "option set '%s': link expected, ignoring\n",
-                        pair->key);
-                break;
-            }
-            else if (APR_SUCCESS != status) {
-                apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n", pair->key,
-                        &status);
-                break;
-            }
-
-            /* stat the key */
-            if ((size = readlink(keyname, target, sizeof(target))) < 0) {
-                status = apr_get_os_error();
-                apr_file_printf(ds->err, "cannot readlink option set '%s': %pm\n", pair->key,
-                        &status);
-            }
-
-            else {
-
-                if (size >= pair->s.symlink_suffix_len) {
-
-                    apr_ssize_t len = size - pair->s.symlink_suffix_len;
-                    char *buf = apr_pstrndup(ds->pool, target, len);
-
-                    value = apr_array_push(values);
-                    value->pair = pair;
-                    value->value = basename(buf);
-                    value->len = strlen(buf);
-
-                }
-                else {
-                    apr_file_printf(ds->err, "option set '%s' does not have suffix: %s\n", pair->key,
-                            pair->s.symlink_suffix);
-                    status = APR_EGENERAL;
-                }
-
-            }
-
-            break;
-
-        }
-        case DEVICE_PAIR_RELATION: {
-
-            const char *keyname;
-            const char *relname;
-            char *relpath;
-            apr_finfo_t finfo;
-
-            keyname = apr_pstrcat(ds->pool, pair->key, pair->suffix, NULL);
-
-            /* stat the file */
-            status = apr_stat(&finfo, keyname,
-                    APR_FINFO_LINK | APR_FINFO_TYPE, ds->pool);
-            if (APR_ENOENT == status) {
-                /* missing - optional or error */
-
-                value = apr_array_push(values);
-                value->pair = pair;
-
-                switch (pair->optional) {
-                case DEVICE_IS_OPTIONAL:
-
-                    value->len = strlen(DEVICE_RELATION_NONE);
-                    value->value = DEVICE_RELATION_NONE;
-
-                    break;
-                case DEVICE_IS_REQUIRED:
-
-                    value->len = strlen(DEVICE_RELATION_ERROR);
-                    value->value = DEVICE_RELATION_ERROR;
-
-                    break;
-                }
-
-                break;
-            }
-            else if (APR_SUCCESS != status) {
-                apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n", pair->key,
-                        &status);
-                break;
-            }
-
-            relname = apr_pstrcat(ds->pool, pair->r.relation_name,
-                    pair->r.relation_suffix, NULL);
-
-            /* find relation */
-            if (APR_SUCCESS
-                    != (status = apr_filepath_merge(&relpath, keyname,
-                            relname, APR_FILEPATH_NOTABSOLUTE, ds->pool))) {
-                apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
-                        &status);
-            }
-
-            /* open/seek/read the file */
-            else if (APR_SUCCESS
-                    != (status = device_file_read(ds, ds->pool, pair->key, relpath, &val, &len))) {
-                /* error already handled */
-                break;
-            }
-
-            value = apr_array_push(values);
-            value->pair = pair;
-            value->value = val;
-            value->len = len;
-
-            break;
-
-        }
-        }
+        device_value(ds, pair, ds->keypath, values, NULL, &max);
 
     }
 
+
     max = 0;
+
+    qsort(values->elts, values->nelts, values->elt_size, values_asc);
 
     for (i = 0; i < values->nelts; i++) {
         device_value_t *value = &APR_ARRAY_IDX(values, i, device_value_t);
@@ -6950,6 +7287,10 @@ int main(int argc, const char * const argv[])
     int address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
     int address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
 
+    const char *flag = NULL;
+    const char *show_flags = NULL;
+    const char *show_table = NULL;
+
     /* lets get APR off the ground, and make sure it terminates cleanly */
     if (APR_SUCCESS != (status = apr_app_initialize(&argc, &argv, NULL))) {
         return 1;
@@ -7055,8 +7396,11 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_INDEX_SUFFIX;
             pair->optional = optional;
             pair->set = DEVICE_IS_DEFAULT;
+            pair->flag = flag;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7068,8 +7412,11 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7081,8 +7428,11 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7094,8 +7444,11 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7107,8 +7460,11 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7120,11 +7476,13 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->sl.bases = ds.select_bases;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.select_bases = NULL;
+            flag = NULL;
 
             break;
         }
@@ -7148,10 +7506,13 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->b.min = bytes_min;
             pair->b.max = bytes_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7181,6 +7542,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = ds.symlink_suffix ? ds.symlink_suffix  : DEVICE_NONE_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->s.bases = ds.symlink_bases;
             pair->s.symlink_suffix = ds.symlink_suffix;
             pair->s.symlink_suffix_len = ds.symlink_suffix_len;
@@ -7192,6 +7554,7 @@ int main(int argc, const char * const argv[])
             ds.symlink_suffix = NULL;
             ds.symlink_suffix_len = 0;
             ds.symlink_context_type = NULL;
+            flag = NULL;
 
             break;
         }
@@ -7224,10 +7587,13 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_SQL_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->q.min = sqlid_min;
             pair->q.max = sqlid_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7239,10 +7605,13 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->q.min = sqlid_min;
             pair->q.max = sqlid_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7272,11 +7641,13 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_USER_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->u.groups = ds.user_groups;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.user_groups = NULL;
+            flag = NULL;
 
             break;
         }
@@ -7300,8 +7671,11 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_DISTINGUISHED_NAME_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7313,6 +7687,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_DIR_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->r.bases = ds.relation_bases;
             pair->r.relation_name = ds.relation_name;
             pair->r.relation_name_len = ds.relation_name_len;
@@ -7322,6 +7697,7 @@ int main(int argc, const char * const argv[])
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.relation_bases = NULL;
+            flag = NULL;
 
             break;
         }
@@ -7355,9 +7731,12 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_ENABLED_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->p.polar_default = polar_default;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7385,9 +7764,12 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_ENABLED_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->sw.switch_default = switch_default;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7415,10 +7797,13 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->i.min = integer_min;
             pair->i.max = integer_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7448,12 +7833,15 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->h.min = hex_min;
             pair->h.max = hex_max;
             pair->h.cs = hex_case;
             pair->h.width = hex_width;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7520,11 +7908,14 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->t.format = text_format;
             pair->t.min = text_min;
             pair->t.max = text_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7560,9 +7951,12 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7574,9 +7968,12 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7588,9 +7985,12 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7602,9 +8002,12 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7616,9 +8019,12 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7630,9 +8036,12 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            flag = NULL;
 
             break;
         }
@@ -7653,12 +8062,14 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->uri.schemes = ds.schemes;
             pair->uri.max = uri_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.schemes = NULL;
+            flag = NULL;
 
             break;
         }
@@ -7670,12 +8081,14 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->uri.schemes = ds.schemes;
             pair->uri.max = uri_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.schemes = NULL;
+            flag = NULL;
 
             break;
         }
@@ -7687,12 +8100,14 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->uri.schemes = ds.schemes;
             pair->uri.max = uri_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.schemes = NULL;
+            flag = NULL;
 
             break;
         }
@@ -7729,6 +8144,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
             pair->a.filesafe = address_filesafe;
@@ -7738,6 +8154,7 @@ int main(int argc, const char * const argv[])
             address_max = DEVICE_ADDRESS_MAX_DEFAULT;
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+            flag = NULL;
 
             break;
         }
@@ -7749,6 +8166,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
             pair->a.filesafe = address_filesafe;
@@ -7758,6 +8176,7 @@ int main(int argc, const char * const argv[])
             address_max = DEVICE_ADDRESS_MAX_DEFAULT;
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+            flag = NULL;
 
             break;
         }
@@ -7769,6 +8188,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
             pair->a.filesafe = address_filesafe;
@@ -7778,6 +8198,7 @@ int main(int argc, const char * const argv[])
             address_max = DEVICE_ADDRESS_MAX_DEFAULT;
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+            flag = NULL;
 
             break;
         }
@@ -7789,6 +8210,7 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flag = flag;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
             pair->a.filesafe = address_filesafe;
@@ -7798,6 +8220,7 @@ int main(int argc, const char * const argv[])
             address_max = DEVICE_ADDRESS_MAX_DEFAULT;
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+            flag = NULL;
 
             break;
         }
@@ -7842,6 +8265,24 @@ int main(int argc, const char * const argv[])
 
             break;
         }
+        case DEVICE_FLAG: {
+
+            flag = optarg;
+
+            break;
+        }
+        case DEVICE_SHOW_FLAGS: {
+
+            show_flags = optarg;
+
+            break;
+        }
+        case DEVICE_SHOW_TABLE: {
+
+            show_table = optarg;
+
+            break;
+        }
         }
 
         if (complete) {
@@ -7851,6 +8292,64 @@ int main(int argc, const char * const argv[])
     }
     if (APR_SUCCESS != status && APR_EOF != status) {
         return help(ds.err, argv[0], NULL, EXIT_FAILURE, cmdline_opts);
+    }
+
+    if (show_table) {
+
+        char *token = apr_pstrdup(ds.pool, show_table);
+        char *last;
+        device_pair_t *pair;
+        device_table_t *entry;
+
+        ds.show_table = apr_array_make(ds.pool, 16, sizeof(device_table_t));
+
+        for (token = apr_strtok(token, ",", &last);
+             token;
+             token = apr_strtok(NULL, ",", &last)) {
+
+            pair = apr_hash_get(ds.pairs, token, APR_HASH_KEY_STRING);
+
+            if (!pair) {
+                return help(ds.err, argv[0],
+                        apr_psprintf(ds.pool,
+                                "The --show-table contained unknown name '%s'.",
+                                token), EXIT_FAILURE, cmdline_opts);
+            }
+
+            entry = apr_array_push(ds.show_table);
+            entry->pair = pair;
+            entry->max = strlen(pair->key);
+
+        }
+    }
+
+    if (show_flags) {
+
+        char *token = apr_pstrdup(ds.pool, show_flags);
+        char *last;
+        device_pair_t *pair;
+        device_table_t *entry;
+
+        ds.show_flags = apr_array_make(ds.pool, 16, sizeof(device_table_t));
+
+        for (token = apr_strtok(token, ",", &last);
+             token;
+             token = apr_strtok(NULL, ",", &last)) {
+
+            pair = apr_hash_get(ds.pairs, token, APR_HASH_KEY_STRING);
+
+            if (!pair) {
+                return help(ds.err, argv[0],
+                        apr_psprintf(ds.pool,
+                                "The --show-flags contained unknown name '%s'.",
+                                token), EXIT_FAILURE, cmdline_opts);
+            }
+
+            entry = apr_array_push(ds.show_flags);
+            entry->pair = pair;
+            entry->max = 0;
+
+        }
     }
 
     if (ds.key) {

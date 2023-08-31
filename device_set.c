@@ -130,8 +130,9 @@
 #define DEVICE_ADDRESS_NOQUOTES 320
 #define DEVICE_ADDRESS_FILESAFE 321
 #define DEVICE_FLAG 322
-#define DEVICE_SHOW_FLAGS 323
-#define DEVICE_SHOW_TABLE 324
+#define DEVICE_SHOW_INDEX 323
+#define DEVICE_SHOW_FLAGS 324
+#define DEVICE_SHOW_TABLE 325
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -172,6 +173,7 @@ typedef struct device_set_t {
     apr_array_header_t *select_bases;
     apr_array_header_t *symlink_bases;
     apr_array_header_t *relation_bases;
+    apr_array_header_t *show_index;
     apr_array_header_t *show_flags;
     apr_array_header_t *show_table;
     const char *symlink_suffix;
@@ -426,8 +428,10 @@ typedef struct device_table_t {
 } device_table_t;
 
 typedef struct device_row_t {
+    apr_array_header_t *indexes;
     apr_array_header_t *flags;
     apr_array_header_t *values;
+    const char *keyval;
     apr_int64_t order;
 } device_row_t;
 
@@ -529,6 +533,7 @@ static const apr_getopt_option_t
 #endif
     { "address-filesafe", DEVICE_ADDRESS_FILESAFE, 1, "  --address-filesafe=[yes|no]\tDo not allow characters in email addresses that would be\n\t\t\t\tunsafe in a filename. This excludes the characters '/'\n\t\t\t\tand '\\'." },
     { "flag", DEVICE_FLAG, 1, "  --flag=chars\tWhen showing a table, use the specified character(s) to indicate the flag is set." },
+    { "show-index", DEVICE_SHOW_INDEX, 1, "  --show-index=name[,name...]\tWhen showing a table, show the specified indexes as the opening columns." },
     { "show-flags", DEVICE_SHOW_FLAGS, 1, "  --show-flags=name[,name...]\tWhen showing a table, show the specified polars or switches as flags." },
     { "show-table", DEVICE_SHOW_TABLE, 1, "  --show-table=name[,name...]\tWhen showing a table, show the specified entries in the given order." },
     { NULL }
@@ -791,6 +796,28 @@ static int values_asc(const void *a, const void *b)
     const device_value_t *va = a, *vb = b;
 
     return strcmp(va->pair->key, vb->pair->key);
+}
+
+static int rows_asc(const void *a, const void *b)
+{
+    const device_row_t *va = a, *vb = b;
+
+    if (va->order == vb->order) {
+
+    	if (va->keyval == vb->keyval) {
+    		return 0;
+    	}
+    	else if (!va->keyval) {
+    		return -1;
+    	}
+    	else if (!vb->keyval) {
+    		return 1;
+    	}
+
+        return strcmp(va->keyval, vb->keyval);
+    }
+
+    return (va->order - vb->order);
 }
 
 static const char * device_hash_to_string(apr_pool_t *pool, apr_hash_t *hash)
@@ -6051,13 +6078,13 @@ static apr_status_t device_rename(device_set_t *ds, const char **args)
 }
 
 static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
-        const char *keypath, apr_array_header_t *values, apr_int64_t *order,
-        int *max)
+        const char *keypath, apr_array_header_t *values, const char **keyval,
+        apr_int64_t *order, int *max)
 {
     char *path;
     device_value_t *value;
-    const char *val;
-    apr_off_t len;
+    const char *val = NULL;
+    apr_off_t len = 0;
 
     apr_status_t status;
 
@@ -6448,6 +6475,10 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
     }
     }
 
+	if (keyval && pair->key && ds->key && !strcmp(pair->key, ds->key)) {
+    	keyval[0] = val;
+    }
+
     return status;
 }
 
@@ -6499,15 +6530,14 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
         case APR_DIR: {
 
             row = apr_array_push(rows);
+            row->indexes = apr_array_make(ds->pool, 16, sizeof(device_value_t));
             row->flags = apr_array_make(ds->pool, 16, sizeof(device_value_t));
             row->values = apr_array_make(ds->pool, 16, sizeof(device_value_t));
 
-            // FIXME - index
+            for (i = 0; i < ds->show_index->nelts; i++) {
+                table = &APR_ARRAY_IDX(ds->show_index, i, device_table_t);
 
-            for (i = 0; i < ds->show_flags->nelts; i++) {
-                table = &APR_ARRAY_IDX(ds->show_flags, i, device_table_t);
-
-                status = device_value(ds, table->pair, dirent.name, row->flags, &row->order, &table->max);
+                status = device_value(ds, table->pair, dirent.name, row->indexes, &row->keyval, &row->order, &table->max);
 
                 if (APR_SUCCESS != status) {
                     device_value_t *value;
@@ -6519,11 +6549,25 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
 
             }
 
+            for (i = 0; i < ds->show_flags->nelts; i++) {
+                table = &APR_ARRAY_IDX(ds->show_flags, i, device_table_t);
+
+                status = device_value(ds, table->pair, dirent.name, row->flags, &row->keyval, &row->order, &table->max);
+
+                if (APR_SUCCESS != status) {
+                    device_value_t *value;
+                    value = apr_array_push(row->flags);
+                    value->pair = table->pair;
+                    value->value = "";
+                    value->len = 0;
+                }
+
+            }
 
             for (i = 0; i < ds->show_table->nelts; i++) {
                 table = &APR_ARRAY_IDX(ds->show_table, i, device_table_t);
 
-                status = device_value(ds, table->pair, dirent.name, row->values, &row->order, &table->max);
+                status = device_value(ds, table->pair, dirent.name, row->values, &row->keyval, &row->order, &table->max);
 
                 if (APR_SUCCESS != status) {
                     device_value_t *value;
@@ -6566,6 +6610,15 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
         apr_file_puts("\n", ds->out);
     }
 
+    /* index header row */
+    for (j = 0; j < ds->show_index->nelts; j++) {
+
+        table = &APR_ARRAY_IDX(ds->show_index, j, device_table_t);
+
+        apr_file_printf(ds->out, "%*s ", table->max, "#");
+
+    }
+
     /* flags header row */
     if (ds->show_flags->nelts) {
         for (j = 0; j < ds->show_flags->nelts; j++) {
@@ -6597,9 +6650,20 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
     }
     apr_file_puts("\n", ds->out);
 
+    /* sort by order, then by key */
+    qsort(rows->elts, rows->nelts, rows->elt_size, rows_asc);
+
     /* rows */
     for (i = 0; i < rows->nelts; i++) {
         row = &APR_ARRAY_IDX(rows, i, device_row_t);
+
+        for (j = 0; j < row->indexes->nelts && j < ds->show_index->nelts; j++) {
+            table = &APR_ARRAY_IDX(ds->show_index, j, device_table_t);
+            value = &APR_ARRAY_IDX(row->indexes, j, device_value_t);
+
+            apr_file_printf(ds->out, "%*s ", table->max, value->value);
+
+        }
 
         for (j = 0; j < row->flags->nelts && j < ds->show_flags->nelts; j++) {
             table = &APR_ARRAY_IDX(ds->show_flags, j, device_table_t);
@@ -6690,7 +6754,7 @@ static apr_status_t device_show(device_set_t *ds, const char **args)
         apr_hash_this(hi, NULL, NULL, &v);
         pair = v;
 
-        device_value(ds, pair, ds->keypath, values, NULL, &max);
+        device_value(ds, pair, ds->keypath, values, NULL, NULL, &max);
 
     }
 
@@ -7224,6 +7288,7 @@ int main(int argc, const char * const argv[])
     int address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
 
     const char *flag = NULL;
+    const char *show_index = NULL;
     const char *show_flags = NULL;
     const char *show_table = NULL;
 
@@ -8207,6 +8272,12 @@ int main(int argc, const char * const argv[])
 
             break;
         }
+        case DEVICE_SHOW_INDEX: {
+
+            show_index = optarg;
+
+            break;
+        }
         case DEVICE_SHOW_FLAGS: {
 
             show_flags = optarg;
@@ -8282,6 +8353,35 @@ int main(int argc, const char * const argv[])
             }
 
             entry = apr_array_push(ds.show_flags);
+            entry->pair = pair;
+            entry->max = 0;
+
+        }
+    }
+
+    ds.show_index = apr_array_make(ds.pool, 16, sizeof(device_table_t));
+
+    if (show_index) {
+
+        char *token = apr_pstrdup(ds.pool, show_index);
+        char *last;
+        device_pair_t *pair;
+        device_table_t *entry;
+
+        for (token = apr_strtok(token, ",", &last);
+             token;
+             token = apr_strtok(NULL, ",", &last)) {
+
+            pair = apr_hash_get(ds.pairs, token, APR_HASH_KEY_STRING);
+
+            if (!pair) {
+                return help(ds.err, argv[0],
+                        apr_psprintf(ds.pool,
+                                "The --show-index contained unknown name '%s'.",
+                                token), EXIT_FAILURE, cmdline_opts);
+            }
+
+            entry = apr_array_push(ds.show_index);
             entry->pair = pair;
             entry->max = 0;
 

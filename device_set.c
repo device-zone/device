@@ -6328,13 +6328,23 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         }
 
         order[0] = apr_strtoi64(val, &end, 10);
-        if (end[0] || errno == ERANGE) {
+        status = apr_get_os_error();
+        if (end[0] || status == APR_ERANGE) {
             apr_file_printf(ds->err,
                     "argument '%s': '%s' is not a valid index, ignoring.\n",
                     apr_pescape_echo(ds->pool, pair->key, 1),
                     apr_pescape_echo(ds->pool, val, 1));
             /* ignore and loop round */
+            break;
         }
+
+        value = apr_array_push(values);
+        value->pair = pair;
+        value->value = val;
+        value->len = len;
+        value->set = 1;
+
+        max[0] = max[0] > value->len ? max[0] : value->len;
 
         break;
     }

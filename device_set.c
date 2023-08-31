@@ -8294,14 +8294,14 @@ int main(int argc, const char * const argv[])
         return help(ds.err, argv[0], NULL, EXIT_FAILURE, cmdline_opts);
     }
 
+    ds.show_table = apr_array_make(ds.pool, 16, sizeof(device_table_t));
+
     if (show_table) {
 
         char *token = apr_pstrdup(ds.pool, show_table);
         char *last;
         device_pair_t *pair;
         device_table_t *entry;
-
-        ds.show_table = apr_array_make(ds.pool, 16, sizeof(device_table_t));
 
         for (token = apr_strtok(token, ",", &last);
              token;
@@ -8323,14 +8323,14 @@ int main(int argc, const char * const argv[])
         }
     }
 
+    ds.show_flags = apr_array_make(ds.pool, 16, sizeof(device_table_t));
+
     if (show_flags) {
 
         char *token = apr_pstrdup(ds.pool, show_flags);
         char *last;
         device_pair_t *pair;
         device_table_t *entry;
-
-        ds.show_flags = apr_array_make(ds.pool, 16, sizeof(device_table_t));
 
         for (token = apr_strtok(token, ",", &last);
              token;

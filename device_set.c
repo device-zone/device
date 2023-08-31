@@ -823,6 +823,91 @@ static const char * device_hash_to_string(apr_pool_t *pool, apr_hash_t *hash)
 
     return buf;
 }
+
+static apr_status_t device_file_open(device_set_t *ds, apr_pool_t *pool,
+        const char *key, const char *filename, apr_file_t **file,
+        apr_off_t *len)
+{
+    apr_file_t *in;
+    apr_off_t end = 0, start = 0;
+
+    apr_status_t status = APR_SUCCESS;
+
+    /* open the file */
+    if (APR_SUCCESS
+            != (status = apr_file_open(&in, filename, APR_FOPEN_READ,
+                    APR_FPROT_OS_DEFAULT, pool))) {
+        apr_file_printf(ds->err, "cannot open option '%s': %pm\n", key,
+                &status);
+    }
+
+    /* how long is the key? */
+    else if (APR_SUCCESS
+            != (status = apr_file_seek(in, APR_END, &end))) {
+        apr_file_printf(ds->err, "cannot seek end of option '%s': %pm\n", key,
+                &status);
+    }
+
+    /* back to the beginning */
+    else if (APR_SUCCESS
+            != (status = apr_file_seek(in, APR_SET, &start))) {
+        apr_file_printf(ds->err, "cannot seek start of option '%s': %pm\n", key,
+                &status);
+    }
+
+    else {
+        file[0] = in;
+        len[0] = end;
+    }
+
+    return status;
+}
+
+static apr_status_t device_file_read(device_set_t *ds, apr_pool_t *pool,
+        const char *key, const char *filename, const char **value,
+        apr_off_t *len)
+{
+    apr_file_t *in;
+
+    char *val = NULL;
+
+    apr_status_t status = APR_SUCCESS;
+
+    /* open/seek the file */
+    if (APR_SUCCESS
+            != (status = device_file_open(ds, pool, key, filename, &in, len))) {
+        /* error already handled */
+    }
+
+    else {
+        apr_off_t size = len[0] + 1;
+        val = apr_palloc(pool, size);
+        val[len[0]] = 0;
+
+        status = apr_file_gets(val, size, in);
+
+        if (APR_EOF == status) {
+            status = APR_SUCCESS;
+        }
+        if (APR_SUCCESS == status) {
+            /* short circuit, all good */
+            val = trim(val);
+        }
+        else {
+            apr_file_printf(ds->err, "cannot read option set '%s': %pm\n", key,
+                    &status);
+        }
+
+        apr_file_close(in);
+    }
+
+    if (APR_SUCCESS == status) {
+        value[0] = val;
+    }
+
+    return status;
+}
+
 /*
  * Index is an integer between APR_INT64_MIN and APR_INT64_MAX inclusive.
  */
@@ -4684,19 +4769,19 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
         case APR_DIR: {
 
             apr_pool_t *pool;
-            char *name = NULL;
-            apr_file_t *in;
+            const char *name = NULL;
             apr_finfo_t finfo;
             const char *keyname;
             const char *relname;
             char *keypath;
             char *relpath;
-            apr_off_t end = 0, start = 0;
+            apr_off_t len;
 
             apr_pool_create(&pool, ds->pool);
 
             switch (pair->type) {
 
+            case DEVICE_PAIR_INDEX:
             case DEVICE_PAIR_PORT:
             case DEVICE_PAIR_UNPRIVILEGED_PORT:
             case DEVICE_PAIR_HOSTNAME:
@@ -4730,54 +4815,15 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
                             &status);
                 }
 
-                /* open the key */
+                /* open/seek/read the key */
                 else if (APR_SUCCESS
-                        != (status = apr_file_open(&in, keypath, APR_FOPEN_READ,
-                                APR_FPROT_OS_DEFAULT, pool))) {
-                    apr_file_printf(ds->err, "cannot open option set '%s': %pm\n", pair->key,
-                            &status);
-                }
-
-                /* how long is the key? */
-                else if (APR_SUCCESS
-                        != (status = apr_file_seek(in, APR_END, &end))) {
-                    apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
-                            &status);
-                }
-
-                /* back to the beginning */
-                else if (APR_SUCCESS
-                        != (status = apr_file_seek(in, APR_SET, &start))) {
-                    apr_file_printf(ds->err, "cannot seek start of option set '%s': %pm\n", pair->key,
-                            &status);
-                }
-
-                else {
-                    int size = end + 1;
-                    name = apr_palloc(pool, size);
-                    name[end] = 0;
-
-                    status = apr_file_gets(name, size, in);
-
-                    if (APR_EOF == status) {
-                        status = APR_SUCCESS;
-                    }
-                    if (APR_SUCCESS == status) {
-                        /* short circuit, all good */
-                        name = trim(name);
-                    }
-                    else {
-                        apr_file_printf(ds->err, "cannot read option set '%s': %pm\n", pair->key,
-                                &status);
-                    }
+                        != (status = device_file_read(ds, pool, pair->key, keypath,
+                                &name, &len))) {
+                    /* error already handled */
                 }
 
                 break;
 
-            case DEVICE_PAIR_INDEX:
-                /* support me */
-                apr_pool_destroy(pool);
-                continue;
             case DEVICE_PAIR_SYMLINK:
 
                 keyname = apr_pstrcat(pool, pair->key, pair->suffix, NULL);
@@ -4833,46 +4879,11 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
                             &status);
                 }
 
-                /* open the key */
+                /* open/seek/read the key */
                 else if (APR_SUCCESS
-                        != (status = apr_file_open(&in, relpath, APR_FOPEN_READ,
-                                APR_FPROT_OS_DEFAULT, pool))) {
-                    apr_file_printf(ds->err, "cannot open option set '%s': %pm\n", pair->key,
-                            &status);
-                }
-
-                /* how long is the key? */
-                else if (APR_SUCCESS
-                        != (status = apr_file_seek(in, APR_END, &end))) {
-                    apr_file_printf(ds->err, "cannot seek end of option set '%s': %pm\n", pair->key,
-                            &status);
-                }
-
-                /* back to the beginning */
-                else if (APR_SUCCESS
-                        != (status = apr_file_seek(in, APR_SET, &start))) {
-                    apr_file_printf(ds->err, "cannot seek start of option set '%s': %pm\n", pair->key,
-                            &status);
-                }
-
-                else {
-                    int size = end + 1;
-                    name = apr_palloc(pool, size);
-                    name[end] = 0;
-
-                    status = apr_file_gets(name, size, in);
-
-                    if (APR_EOF == status) {
-                        status = APR_SUCCESS;
-                    }
-                    if (APR_SUCCESS == status) {
-                        /* short circuit, all good */
-                        name = trim(name);
-                    }
-                    else {
-                        apr_file_printf(ds->err, "cannot read option set '%s': %pm\n", pair->key,
-                                &status);
-                    }
+                        != (status = device_file_read(ds, pool, pair->key, relpath,
+                                &name, &len))) {
+                    /* error already handled */
                 }
 
                 break;
@@ -6037,91 +6048,6 @@ static apr_status_t device_rename(device_set_t *ds, const char **args)
 {
 
     return device_set(ds, args);
-}
-// FIXME
-
-static apr_status_t device_file_open(device_set_t *ds, apr_pool_t *pool,
-        const char *key, const char *filename, apr_file_t **file,
-        apr_off_t *len)
-{
-    apr_file_t *in;
-    apr_off_t end = 0, start = 0;
-
-    apr_status_t status = APR_SUCCESS;
-
-    /* open the file */
-    if (APR_SUCCESS
-            != (status = apr_file_open(&in, filename, APR_FOPEN_READ,
-                    APR_FPROT_OS_DEFAULT, pool))) {
-        apr_file_printf(ds->err, "cannot open option '%s': %pm\n", key,
-                &status);
-    }
-
-    /* how long is the key? */
-    else if (APR_SUCCESS
-            != (status = apr_file_seek(in, APR_END, &end))) {
-        apr_file_printf(ds->err, "cannot seek end of option '%s': %pm\n", key,
-                &status);
-    }
-
-    /* back to the beginning */
-    else if (APR_SUCCESS
-            != (status = apr_file_seek(in, APR_SET, &start))) {
-        apr_file_printf(ds->err, "cannot seek start of option '%s': %pm\n", key,
-                &status);
-    }
-
-    else {
-        file[0] = in;
-        len[0] = end;
-    }
-
-    return status;
-}
-
-static apr_status_t device_file_read(device_set_t *ds, apr_pool_t *pool,
-        const char *key, const char *filename, const char **value,
-        apr_off_t *len)
-{
-    apr_file_t *in;
-
-    char *val = NULL;
-
-    apr_status_t status = APR_SUCCESS;
-
-    /* open/seek the file */
-    if (APR_SUCCESS
-            != (status = device_file_open(ds, pool, key, filename, &in, len))) {
-        /* error already handled */
-    }
-
-    else {
-        apr_off_t size = len[0] + 1;
-        val = apr_palloc(pool, size);
-        val[len[0]] = 0;
-
-        status = apr_file_gets(val, size, in);
-
-        if (APR_EOF == status) {
-            status = APR_SUCCESS;
-        }
-        if (APR_SUCCESS == status) {
-            /* short circuit, all good */
-            val = trim(val);
-        }
-        else {
-            apr_file_printf(ds->err, "cannot read option set '%s': %pm\n", key,
-                    &status);
-        }
-
-        apr_file_close(in);
-    }
-
-    if (APR_SUCCESS == status) {
-        value[0] = val;
-    }
-
-    return status;
 }
 
 static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,

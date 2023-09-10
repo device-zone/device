@@ -5448,9 +5448,27 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             case DEVICE_PAIR_URL_PATH_EMPTY:
                 status = device_parse_url_path_empty(ds, pair, value, options, NULL);
                 break;
-
-            default:
-                status = APR_EINVAL;
+            case DEVICE_PAIR_URI:
+                status = device_parse_uri(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_URI_ABSOLUTE:
+                status = device_parse_uri_absolute(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_URI_RELATIVE:
+                status = device_parse_uri_relative(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_ADDRESS:
+                status = device_parse_address(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_ADDRESS_MAILBOX:
+                status = device_parse_address_mailbox(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_ADDRESS_ADDRSPEC:
+                status = device_parse_address_addrspec(ds, pair, value, options, NULL);
+                break;
+            case DEVICE_PAIR_ADDRESS_LOCALPART:
+                status = device_parse_address_localpart(ds, pair, value, options, NULL);
+                break;
             }
 
             for (i = 0; i < options->nelts; i++) {

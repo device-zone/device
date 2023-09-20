@@ -3155,6 +3155,8 @@ done:
     }
     else if (APR_STATUS_IS_ENOENT(status)) {
 
+        status = APR_SUCCESS;
+
         if (option) {
             if (options->nelts == 1) {
                 /* all ok */
@@ -3165,8 +3167,6 @@ done:
                 status = APR_INCOMPLETE;
             }
         }
-
-        status = APR_SUCCESS;
     }
     else {
         apr_file_printf(ds->err, "cannot read option '%s': %pm\n", pair->key,

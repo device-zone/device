@@ -2007,7 +2007,6 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
 
                 if (none) {
                     path = none;
-                    none = NULL;
                 }
                 else if (dirname) {
                     if (dirname[0]) {

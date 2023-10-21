@@ -6453,15 +6453,63 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
 
         else {
 
+            const char *val;
+
+            int i;
+            int found = 0;
+
+            /* match the base path */
+            for (i = 0; i < pair->s.bases->nelts; i++) {
+
+                char *base = APR_ARRAY_IDX(pair->s.bases, i, char *);
+
+                int baselen = strlen(base);
+
+                /* ignore trailing '/' if it exists */
+                if (baselen && base[baselen - 1] == '/') {
+                    baselen--;
+                }
+
+                /* do we have a prefix match? */
+                if (baselen <= size && !strncmp(base, target, baselen)) {
+
+                    val = target + baselen;
+                    size = size - baselen;
+
+                    /* do we have exact match or a '/' at the end? */
+                    if (!size || val[0] == '/') {
+                        found = 1;
+                        break;
+                    }
+
+                }
+
+            }
+
+            /* oops, no base path matches */
+            if (!found) {
+                apr_file_printf(ds->err,
+                        "option set '%s' does not exist beneath bases.\n", pair->key);
+                status = APR_EGENERAL;
+            }
+
+            if (!pair->s.symlink_recursive && size && val[0] == '/') {
+
+                /* skip past '/' */
+                val++;
+                size--;
+
+            }
+
             if (size >= pair->s.symlink_suffix_len) {
 
                 apr_ssize_t len = size - pair->s.symlink_suffix_len;
-                char *buf = apr_pstrndup(ds->pool, target, len);
+                val = apr_pstrndup(ds->pool, val, len);
 
                 value = apr_array_push(values);
                 value->pair = pair;
-                value->value = basename(buf);
-                value->len = strlen(buf);
+                value->value = val;
+                value->len = strlen(val);
                 value->set = 1;
 
                 max[0] = max[0] > value->len ? max[0] : value->len;

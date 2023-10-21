@@ -179,6 +179,7 @@ typedef struct device_set_t {
     const char *symlink_suffix;
     int symlink_suffix_len;
     const char *symlink_context_type;
+    unsigned int symlink_recursive:1;
     const char *relation_name;
     int relation_name_len;
     const char *relation_suffix;
@@ -307,6 +308,7 @@ typedef struct device_pair_symlinks_t {
     const char *symlink_suffix;
     int symlink_suffix_len;
     const char *symlink_context_type;
+    unsigned int symlink_recursive:1;
 } device_pair_symlinks_t;
 
 typedef struct device_pair_relations_t {
@@ -479,8 +481,8 @@ static const apr_getopt_option_t
 #endif
 #if 0
     { "symlink-magic", DEVICE_SYMLINK_MAGIC, 1, "  --symlink-magic=magic\tLimit targets for symbolic links to this magic file definition." },
-    { "symlink-recursive", DEVICE_SYMLINK_RECURSIVE, 0, "  --symlink-recursive\tLimit targets for symbolic links to directories recursively below this level." },
 #endif
+    { "symlink-recursive", DEVICE_SYMLINK_RECURSIVE, 0, "  --symlink-recursive\tAllow targets for symbolic links to exist recursively within a directory tree." },
     { "symlink", DEVICE_SYMLINK, 1, "  --symlink=name\t\tParse a selection from a list of files or\n\t\t\t\tdirectories matching the symlink-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
     { "sql-id", DEVICE_SQL_IDENTIFIER, 1, "  --sql-id=id\t\t\tSQL identifier in regular format. Regular\n\t\t\t\tidentifiers start with a letter (a-z, but also\n\t\t\t\tletters with diacritical marks and non-Latin\n\t\t\t\tletters) or an underscore (_). Subsequent\n\t\t\t\tcharacters in an identifier can be letters,\n\t\t\t\tunderscores, or digits (0-9). The resulting value\n\t\t\t\tdoes not need to be SQL escaped before use." },
     { "sql-delimited-id", DEVICE_SQL_DELIMITED_IDENTIFIER, 1, "  --sql-delimited-id=id\t\tSQL identifier in delimited format. Delimited\n\t\t\t\tidentifiers consist of any UTF8 non-zero character.\n\t\t\t\tThe resulting value must be SQL escaped separately\n\t\t\t\tbefore use." },
@@ -804,15 +806,15 @@ static int rows_asc(const void *a, const void *b)
 
     if (va->order == vb->order) {
 
-    	if (va->keyval == vb->keyval) {
-    		return 0;
-    	}
-    	else if (!va->keyval) {
-    		return -1;
-    	}
-    	else if (!vb->keyval) {
-    		return 1;
-    	}
+        if (va->keyval == vb->keyval) {
+            return 0;
+        }
+        else if (!va->keyval) {
+            return -1;
+        }
+        else if (!vb->keyval) {
+            return 1;
+        }
 
         return strcmp(va->keyval, vb->keyval);
     }
@@ -1824,9 +1826,9 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
         const char *arg, apr_array_header_t *options, const char **option,
         const char **link)
 {
-    const char *none = NULL;
+    const char *none = NULL, *dirname, *basename;
     apr_status_t status;
-    apr_size_t arglen = arg ? strlen(arg) : 0;
+    apr_size_t baselen;
 
     apr_array_header_t *possibles = apr_array_make(ds->pool, 10, sizeof(char *));
 
@@ -1835,6 +1837,46 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
     if (option) {
         option[0] = NULL; /* until further notice */
     }
+
+    /* find the base path, up to depth */
+    if (pair->optional == DEVICE_IS_OPTIONAL && !strcmp(arg, DEVICE_SYMLINK_NONE)) {
+        basename = arg;
+        dirname = NULL;
+    }
+
+    else if (pair->s.symlink_recursive) {
+
+        if (arg[0] != '/') {
+            apr_file_printf(ds->err, "'%s' must start with a '/'.\n", pair->key);
+            return APR_EINVAL;
+        }
+
+        else {
+            basename = strrchr(arg + 1, '/');
+            if (!basename) {
+                dirname = "";
+                basename = arg + 1;
+            }
+            else {
+                dirname = apr_pstrndup(ds->pool, arg + 1, basename - arg - 1);
+                basename++;
+            }
+        }
+
+    }
+    else {
+
+        if (arg[0] == '/') {
+            apr_file_printf(ds->err, "'%s' must not start with a '/'.\n", pair->key);
+            return APR_EINVAL;
+        }
+
+        basename = arg;
+        dirname = NULL;
+
+    }
+
+    baselen = strlen(basename);
 
     if (!pair->s.bases) {
         apr_file_printf(ds->err, "no base directory specified for '%s'\n", pair->key);
@@ -1850,7 +1892,16 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
         apr_dir_t *thedir;
         apr_finfo_t dirent;
 
-        const char *base = APR_ARRAY_IDX(pair->s.bases, i, const char *);
+        char *base = APR_ARRAY_IDX(pair->s.bases, i, char *);
+
+        if (dirname && dirname[0] && APR_SUCCESS
+                != (status = apr_filepath_merge(&base, base,
+                        dirname,
+                        APR_FILEPATH_SECUREROOT, ds->pool))) {
+            apr_file_printf(ds->err, "cannot merge directory for '%s': %pm\n", pair->key,
+                    &status);
+            return status;
+        }
 
         if ((status = apr_dir_open(&thedir, base, ds->pool)) != APR_SUCCESS) {
             /* could not open directory, skip */
@@ -1950,12 +2001,30 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
             case APR_REG:
             case APR_DIR: {
 
-                int exact = (0 == strcmp(arg, name));
+                int exact = (0 == strcmp(basename, name));
+
+                const char *path;
+
+                if (none) {
+                    path = none;
+                    none = NULL;
+                }
+                else if (dirname) {
+                    if (dirname[0]) {
+                        path = apr_pstrcat(ds->pool, "/", dirname, "/", name, NULL);
+                    }
+                    else {
+                        path = apr_pstrcat(ds->pool, "/", name, NULL);
+                    }
+                }
+                else {
+                    path = name;
+                }
 
                 possible = apr_array_push(possibles);
                 possible[0] = name;
 
-                if (!strncmp(arg, name, arglen)) {
+                if (!strncmp(basename, name, baselen)) {
 
                     const char **opt;
 
@@ -1967,7 +2036,7 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
                     opt[0] = apr_pstrcat(ds->pool,
                             pair->optional == DEVICE_IS_OPTIONAL ? "-" : "*",
                             device_pescape_shell(ds->pool, pair->key), "=",
-                            device_pescape_shell(ds->pool, name),
+                            device_pescape_shell(ds->pool, path),
                             NULL);
 
                     if (option) {
@@ -6493,8 +6562,8 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
     }
     }
 
-	if (keyval && pair->key && ds->key && !strcmp(pair->key, ds->key)) {
-    	keyval[0] = val;
+    if (keyval && pair->key && ds->key && !strcmp(pair->key, ds->key)) {
+        keyval[0] = val;
     }
 
     return status;
@@ -7566,6 +7635,7 @@ int main(int argc, const char * const argv[])
             pair->s.symlink_suffix = ds.symlink_suffix;
             pair->s.symlink_suffix_len = ds.symlink_suffix_len;
             pair->s.symlink_context_type = ds.symlink_context_type;
+            pair->s.symlink_recursive = ds.symlink_recursive;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
@@ -7573,6 +7643,7 @@ int main(int argc, const char * const argv[])
             ds.symlink_suffix = NULL;
             ds.symlink_suffix_len = 0;
             ds.symlink_context_type = NULL;
+            ds.symlink_recursive = 0;
             flag = NULL;
 
             break;
@@ -7596,6 +7667,10 @@ int main(int argc, const char * const argv[])
         }
         case DEVICE_SYMLINK_CONTEXT_TYPE: {
             ds.symlink_context_type = optarg;
+            break;
+        }
+        case DEVICE_SYMLINK_RECURSIVE: {
+            ds.symlink_recursive = 1;
             break;
         }
         case DEVICE_SQL_IDENTIFIER: {

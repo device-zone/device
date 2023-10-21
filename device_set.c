@@ -414,7 +414,7 @@ typedef struct device_value_t {
     device_pair_t *pair;
     const char *value;
     apr_off_t len;
-    int set:1;
+    unsigned int set:1;
 } device_value_t;
 
 typedef struct device_values_t {

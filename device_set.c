@@ -67,72 +67,73 @@
 #define DEVICE_OPTIONAL 257
 #define DEVICE_REQUIRED 258
 #define DEVICE_INDEX 259
-#define DEVICE_PORT 260
-#define DEVICE_UNPRIVILEGED_PORT 261
-#define DEVICE_HOSTNAME 262
-#define DEVICE_FQDN 263
-#define DEVICE_SELECT 264
-#define DEVICE_SELECT_BASE 265
-#define DEVICE_SELECT_MATRIX 266
-#define DEVICE_BYTES 267
-#define DEVICE_BYTES_MIN 268
-#define DEVICE_BYTES_MAX 269
-#define DEVICE_SYMLINK 270
-#define DEVICE_SYMLINK_BASE 271
-#define DEVICE_SYMLINK_SUFFIX 272
-#define DEVICE_SYMLINK_CONTEXT_TYPE 273
-#define DEVICE_SYMLINK_MAGIC 274
-#define DEVICE_SYMLINK_RECURSIVE 275
-#define DEVICE_SQL_IDENTIFIER 276
-#define DEVICE_SQL_DELIMITED_IDENTIFIER 277
-#define DEVICE_SQL_IDENTIFIER_MIN 278
-#define DEVICE_SQL_IDENTIFIER_MAX 279
-#define DEVICE_USER_GROUP 280
-#define DEVICE_USER 281
-#define DEVICE_DISTINGUISHED_NAME 282
-#define DEVICE_RELATION_BASE 283
-#define DEVICE_RELATION_NAME 284
-#define DEVICE_RELATION_SUFFIX 285
-#define DEVICE_RELATION 286
-#define DEVICE_POLAR 287
-#define DEVICE_POLAR_DEFAULT 288
-#define DEVICE_SWITCH 289
-#define DEVICE_SWITCH_DEFAULT 290
-#define DEVICE_INTEGER 291
-#define DEVICE_INTEGER_MIN 292
-#define DEVICE_INTEGER_MAX 293
-#define DEVICE_TEXT 294
-#define DEVICE_TEXT_MIN 295
-#define DEVICE_TEXT_MAX 296
-#define DEVICE_TEXT_FORMAT 297
-#define DEVICE_HEX 298
-#define DEVICE_HEX_MIN 299
-#define DEVICE_HEX_MAX 300
-#define DEVICE_HEX_CASE 301
-#define DEVICE_HEX_WIDTH 302
-#define DEVICE_URL_PATH 303
-#define DEVICE_URL_PATH_ABEMPTY 304
-#define DEVICE_URL_PATH_ABSOLUTE 305
-#define DEVICE_URL_PATH_NOSCHEME 306
-#define DEVICE_URL_PATH_ROOTLESS 307
-#define DEVICE_URL_PATH_EMPTY 308
-#define DEVICE_URL_PATH_MAX 309
-#define DEVICE_URI 310
-#define DEVICE_URI_ABSOLUTE 311
-#define DEVICE_URI_RELATIVE 312
-#define DEVICE_URI_MAX 313
-#define DEVICE_URI_SCHEMES 314
-#define DEVICE_ADDRESS 315
-#define DEVICE_ADDRESS_MAILBOX 316
-#define DEVICE_ADDRESS_ADDRSPEC 317
-#define DEVICE_ADDRESS_LOCALPART 318
-#define DEVICE_ADDRESS_MAX 319
-#define DEVICE_ADDRESS_NOQUOTES 320
-#define DEVICE_ADDRESS_FILESAFE 321
-#define DEVICE_FLAG 322
-#define DEVICE_SHOW_INDEX 323
-#define DEVICE_SHOW_FLAGS 324
-#define DEVICE_SHOW_TABLE 325
+#define DEVICE_DEFAULT 260
+#define DEVICE_PORT 261
+#define DEVICE_UNPRIVILEGED_PORT 262
+#define DEVICE_HOSTNAME 263
+#define DEVICE_FQDN 264
+#define DEVICE_SELECT 265
+#define DEVICE_SELECT_BASE 266
+#define DEVICE_SELECT_MATRIX 267
+#define DEVICE_BYTES 268
+#define DEVICE_BYTES_MIN 269
+#define DEVICE_BYTES_MAX 270
+#define DEVICE_SYMLINK 271
+#define DEVICE_SYMLINK_BASE 272
+#define DEVICE_SYMLINK_SUFFIX 273
+#define DEVICE_SYMLINK_CONTEXT_TYPE 274
+#define DEVICE_SYMLINK_MAGIC 275
+#define DEVICE_SYMLINK_RECURSIVE 276
+#define DEVICE_SQL_IDENTIFIER 277
+#define DEVICE_SQL_DELIMITED_IDENTIFIER 278
+#define DEVICE_SQL_IDENTIFIER_MIN 279
+#define DEVICE_SQL_IDENTIFIER_MAX 280
+#define DEVICE_USER_GROUP 281
+#define DEVICE_USER 282
+#define DEVICE_DISTINGUISHED_NAME 283
+#define DEVICE_RELATION_BASE 284
+#define DEVICE_RELATION_NAME 285
+#define DEVICE_RELATION_SUFFIX 286
+#define DEVICE_RELATION 287
+#define DEVICE_POLAR 288
+#define DEVICE_POLAR_DEFAULT 289
+#define DEVICE_SWITCH 290
+#define DEVICE_SWITCH_DEFAULT 291
+#define DEVICE_INTEGER 292
+#define DEVICE_INTEGER_MIN 293
+#define DEVICE_INTEGER_MAX 294
+#define DEVICE_TEXT 295
+#define DEVICE_TEXT_MIN 296
+#define DEVICE_TEXT_MAX 297
+#define DEVICE_TEXT_FORMAT 298
+#define DEVICE_HEX 299
+#define DEVICE_HEX_MIN 300
+#define DEVICE_HEX_MAX 301
+#define DEVICE_HEX_CASE 302
+#define DEVICE_HEX_WIDTH 303
+#define DEVICE_URL_PATH 304
+#define DEVICE_URL_PATH_ABEMPTY 305
+#define DEVICE_URL_PATH_ABSOLUTE 306
+#define DEVICE_URL_PATH_NOSCHEME 307
+#define DEVICE_URL_PATH_ROOTLESS 308
+#define DEVICE_URL_PATH_EMPTY 309
+#define DEVICE_URL_PATH_MAX 310
+#define DEVICE_URI 311
+#define DEVICE_URI_ABSOLUTE 312
+#define DEVICE_URI_RELATIVE 313
+#define DEVICE_URI_MAX 314
+#define DEVICE_URI_SCHEMES 315
+#define DEVICE_ADDRESS 316
+#define DEVICE_ADDRESS_MAILBOX 317
+#define DEVICE_ADDRESS_ADDRSPEC 318
+#define DEVICE_ADDRESS_LOCALPART 319
+#define DEVICE_ADDRESS_MAX 320
+#define DEVICE_ADDRESS_NOQUOTES 321
+#define DEVICE_ADDRESS_FILESAFE 322
+#define DEVICE_FLAG 323
+#define DEVICE_SHOW_INDEX 324
+#define DEVICE_SHOW_FLAGS 325
+#define DEVICE_SHOW_TABLE 326
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -182,6 +183,8 @@ typedef struct device_set_t {
     unsigned int symlink_recursive:1;
     const char *relation_name;
     int relation_name_len;
+    const char *relation_prefix;
+    int relation_prefix_len;
     const char *relation_suffix;
     int relation_suffix_len;
     apr_hash_t *schemes;
@@ -216,6 +219,7 @@ typedef struct device_set_t {
 #define DEVICE_TEXT_FORMAT_DEFAULT "UTF-8"
 #define DEVICE_URL_PATH_MAX_DEFAULT 256
 #define DEVICE_URI_MAX_DEFAULT 256
+#define DEVICE_USER_NONE "none"
 #define DEVICE_ADDRESS_MAX_DEFAULT 256
 #define DEVICE_ADDRESS_NOQUOTES_DEFAULT 1
 #define DEVICE_ADDRESS_FILESAFE_DEFAULT 0
@@ -315,6 +319,8 @@ typedef struct device_pair_relations_t {
     apr_array_header_t *bases;
     const char *relation_name;
     int relation_name_len;
+    const char *relation_prefix;
+    int relation_prefix_len;
     const char *relation_suffix;
     int relation_suffix_len;
 } device_pair_relations_t;
@@ -375,6 +381,7 @@ typedef struct device_pair_t {
     const char *key;
     const char *suffix;
     const char *flag;
+    const char *unset;
     device_pair_e type;
     device_optional_e optional;
     device_unique_e unique;
@@ -1453,7 +1460,12 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
     }
 
     if (pair->optional == DEVICE_IS_OPTIONAL) {
-        none = DEVICE_SELECT_NONE;
+        if (pair->unset) {
+            none = pair->unset;
+        }
+        else {
+            none = DEVICE_SELECT_NONE;
+        }
     }
 
     for (i = 0; i < pair->sl.bases->nelts; i++) {
@@ -1495,7 +1507,7 @@ static apr_status_t device_parse_select(device_set_t *ds, device_pair_t *pair,
                 int exact;
 
                 if (none) {
-                    strcpy(buffer, DEVICE_SELECT_NONE);
+                    strcpy(buffer, none);
                 } else {
                     status = apr_file_gets(buffer, size, in);
                     if (status != APR_SUCCESS) {
@@ -1838,8 +1850,17 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
         option[0] = NULL; /* until further notice */
     }
 
+    if (pair->optional == DEVICE_IS_OPTIONAL) {
+        if (pair->unset) {
+            none = pair->unset;
+        }
+        else {
+            none = DEVICE_SYMLINK_NONE;
+        }
+    }
+
     /* find the base path, up to depth */
-    if (pair->optional == DEVICE_IS_OPTIONAL && !strcmp(arg, DEVICE_SYMLINK_NONE)) {
+    if (none && !strcmp(arg, none)) {
         basename = arg;
         dirname = NULL;
     }
@@ -1881,10 +1902,6 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
     if (!pair->s.bases) {
         apr_file_printf(ds->err, "no base directory specified for '%s'\n", pair->key);
         return APR_EGENERAL;
-    }
-
-    if (pair->optional == DEVICE_IS_OPTIONAL) {
-        none = DEVICE_SYMLINK_NONE;
     }
 
     for (i = 0; i < pair->s.bases->nelts; i++) {
@@ -2454,7 +2471,12 @@ static apr_status_t device_parse_user(device_set_t *ds, device_pair_t *pair,
     }
 
     if (pair->optional == DEVICE_IS_OPTIONAL) {
-        none = DEVICE_SELECT_NONE;
+        if (pair->unset) {
+            none = pair->unset;
+        }
+        else {
+            none = DEVICE_USER_NONE;
+        }
     }
 
     if (!pair->u.groups) {
@@ -3051,7 +3073,12 @@ static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
     }
 
     if (pair->optional == DEVICE_IS_OPTIONAL) {
-        none = DEVICE_RELATION_NONE;
+        if (pair->unset) {
+            none = pair->unset;
+        }
+        else {
+            none = DEVICE_RELATION_NONE;
+        }
     }
 
     apr_pool_create(&pool, ds->pool);
@@ -6232,6 +6259,9 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         APR_FINFO_TYPE, ds->pool);
         if (APR_ENOENT == status) {
             /* missing - ignore the file */
+
+            /* FIXME: the none/default option goes here */
+
             break;
         } else if (APR_SUCCESS != status) {
             apr_file_printf(ds->err, "cannot stat option set '%s': %pm\n",
@@ -6429,8 +6459,14 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
             switch (pair->optional) {
             case DEVICE_IS_OPTIONAL:
 
-                value->len = strlen(DEVICE_SYMLINK_NONE);
-                value->value = DEVICE_SYMLINK_NONE;
+                if (pair->unset) {
+                    value->len = strlen(pair->unset);
+                    value->value = pair->unset;
+                }
+                else {
+                    value->len = strlen(DEVICE_SYMLINK_NONE);
+                    value->value = DEVICE_SYMLINK_NONE;
+                }
 
                 break;
             case DEVICE_IS_REQUIRED:
@@ -6566,8 +6602,14 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
             switch (pair->optional) {
             case DEVICE_IS_OPTIONAL:
 
-                value->len = strlen(DEVICE_RELATION_NONE);
-                value->value = DEVICE_RELATION_NONE;
+                if (pair->unset) {
+                    value->len = strlen(pair->unset);
+                    value->value = pair->unset;
+                }
+                else {
+                    value->len = strlen(DEVICE_RELATION_NONE);
+                    value->value = DEVICE_RELATION_NONE;
+                }
 
                 break;
             case DEVICE_IS_REQUIRED:
@@ -7437,6 +7479,8 @@ int main(int argc, const char * const argv[])
     const char *show_flags = NULL;
     const char *show_table = NULL;
 
+    const char *unset = NULL;
+
     /* lets get APR off the ground, and make sure it terminates cleanly */
     if (APR_SUCCESS != (status = apr_app_initialize(&argc, &argv, NULL))) {
         return 1;
@@ -7533,6 +7577,10 @@ int main(int argc, const char * const argv[])
             help(ds.out, argv[0], NULL, 0, cmdline_opts);
             return 0;
         }
+        case DEVICE_DEFAULT: {
+            unset = optarg;
+            break;
+        }
         case DEVICE_INDEX: {
 
             device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
@@ -7543,10 +7591,12 @@ int main(int argc, const char * const argv[])
             pair->optional = optional;
             pair->set = DEVICE_IS_DEFAULT;
             pair->flag = flag;
+            pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7559,10 +7609,12 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7575,10 +7627,12 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7591,10 +7645,12 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7607,10 +7663,12 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7624,11 +7682,13 @@ int main(int argc, const char * const argv[])
             pair->optional = optional;
             pair->flag = flag;
             pair->sl.bases = ds.select_bases;
+            pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.select_bases = NULL;
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7653,12 +7713,14 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->b.min = bytes_min;
             pair->b.max = bytes_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7689,6 +7751,7 @@ int main(int argc, const char * const argv[])
             pair->suffix = ds.symlink_suffix ? ds.symlink_suffix  : DEVICE_NONE_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->s.bases = ds.symlink_bases;
             pair->s.symlink_suffix = ds.symlink_suffix;
             pair->s.symlink_suffix_len = ds.symlink_suffix_len;
@@ -7703,6 +7766,7 @@ int main(int argc, const char * const argv[])
             ds.symlink_context_type = NULL;
             ds.symlink_recursive = 0;
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7740,12 +7804,14 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_SQL_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->q.min = sqlid_min;
             pair->q.max = sqlid_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7758,12 +7824,14 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->q.min = sqlid_min;
             pair->q.max = sqlid_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7794,12 +7862,14 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_USER_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->u.groups = ds.user_groups;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.user_groups = NULL;
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7824,10 +7894,12 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_DISTINGUISHED_NAME_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7840,9 +7912,12 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_DIR_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->r.bases = ds.relation_bases;
             pair->r.relation_name = ds.relation_name;
             pair->r.relation_name_len = ds.relation_name_len;
+            pair->r.relation_prefix = ds.relation_prefix;
+            pair->r.relation_prefix_len = ds.relation_prefix_len;
             pair->r.relation_suffix = ds.relation_suffix;
             pair->r.relation_suffix_len = ds.relation_suffix_len;
 
@@ -7850,6 +7925,7 @@ int main(int argc, const char * const argv[])
 
             ds.relation_bases = NULL;
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7884,11 +7960,13 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_ENABLED_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->p.polar_default = polar_default;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7917,11 +7995,13 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_ENABLED_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->sw.switch_default = switch_default;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7950,12 +8030,14 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->i.min = integer_min;
             pair->i.max = integer_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -7986,6 +8068,7 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->h.min = hex_min;
             pair->h.max = hex_max;
             pair->h.cs = hex_case;
@@ -7994,6 +8077,7 @@ int main(int argc, const char * const argv[])
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8061,6 +8145,7 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->t.format = text_format;
             pair->t.min = text_min;
             pair->t.max = text_max;
@@ -8068,6 +8153,7 @@ int main(int argc, const char * const argv[])
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8104,11 +8190,13 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8121,11 +8209,13 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8138,11 +8228,13 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8155,11 +8247,13 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8172,11 +8266,13 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8189,11 +8285,13 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8215,6 +8313,7 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->uri.schemes = ds.schemes;
             pair->uri.max = uri_max;
 
@@ -8222,6 +8321,7 @@ int main(int argc, const char * const argv[])
 
             ds.schemes = NULL;
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8234,6 +8334,7 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->uri.schemes = ds.schemes;
             pair->uri.max = uri_max;
 
@@ -8241,6 +8342,7 @@ int main(int argc, const char * const argv[])
 
             ds.schemes = NULL;
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8253,6 +8355,7 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->uri.schemes = ds.schemes;
             pair->uri.max = uri_max;
 
@@ -8260,6 +8363,7 @@ int main(int argc, const char * const argv[])
 
             ds.schemes = NULL;
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8297,6 +8401,7 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
             pair->a.filesafe = address_filesafe;
@@ -8307,6 +8412,7 @@ int main(int argc, const char * const argv[])
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8319,6 +8425,7 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
             pair->a.filesafe = address_filesafe;
@@ -8329,6 +8436,7 @@ int main(int argc, const char * const argv[])
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8341,6 +8449,7 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
             pair->a.filesafe = address_filesafe;
@@ -8351,6 +8460,7 @@ int main(int argc, const char * const argv[])
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
             flag = NULL;
+            unset = NULL;
 
             break;
         }
@@ -8363,6 +8473,7 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
             pair->flag = flag;
+            pair->unset = unset;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
             pair->a.filesafe = address_filesafe;
@@ -8373,6 +8484,7 @@ int main(int argc, const char * const argv[])
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
             flag = NULL;
+            unset = NULL;
 
             break;
         }

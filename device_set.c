@@ -3108,14 +3108,19 @@ static apr_status_t device_parse_relation(device_set_t *ds, device_pair_t *pair,
                 if (APR_SUCCESS
                         != (status = apr_filepath_merge(&keypath, base, dirent.name,
                                 APR_FILEPATH_NATIVE, pool))) {
-                    apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                    apr_file_printf(ds->err, "cannot merge option set key '%s' (base): %pm\n", pair->key,
                             &status);
                 }
-
+                else if (pair->r.relation_prefix && APR_SUCCESS
+                        != (status = apr_filepath_merge(&keypath, keypath,
+                                pair->r.relation_prefix, APR_FILEPATH_NATIVE, pool))) {
+                    apr_file_printf(ds->err, "cannot merge option set key '%s' (prefix): %pm\n", pair->key,
+                            &status);
+                }
                 else if (APR_SUCCESS
                         != (status = apr_filepath_merge(&keyfile, keypath,
                                 keyname, APR_FILEPATH_NATIVE, pool))) {
-                    apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                    apr_file_printf(ds->err, "cannot merge option set key '%s' (name): %pm\n", pair->key,
                             &status);
                 }
 
@@ -4962,15 +4967,21 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
                 if (APR_SUCCESS
                         != (status = apr_filepath_merge(&keypath, dirent.name,
                                 keyname, APR_FILEPATH_NOTABSOLUTE, pool))) {
-                    apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                    apr_file_printf(ds->err, "cannot merge option set key '%s' (base): %pm\n", pair->key,
                             &status);
                 }
 
                 /* find relation */
-                if (APR_SUCCESS
+                else if (APR_SUCCESS
                         != (status = apr_filepath_merge(&relpath, keypath,
                                 relname, APR_FILEPATH_NOTABSOLUTE, pool))) {
-                    apr_file_printf(ds->err, "cannot merge option set key '%s': %pm\n", pair->key,
+                    apr_file_printf(ds->err, "cannot merge option set key '%s' (name): %pm\n", pair->key,
+                            &status);
+                }
+                else if (pair->r.relation_prefix && APR_SUCCESS
+                        != (status = apr_filepath_merge(&relpath, relpath,
+                                pair->r.relation_prefix, APR_FILEPATH_NOTABSOLUTE, pool))) {
+                    apr_file_printf(ds->err, "cannot merge option set key '%s' (name): %pm\n", pair->key,
                             &status);
                 }
 

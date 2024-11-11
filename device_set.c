@@ -465,6 +465,7 @@ static const apr_getopt_option_t
 #if 0
     { "list", 'l', 0, "  -l, --list\t\t\tList the options in a set of options." },
 #endif
+    { "default", DEVICE_DEFAULT, 1, "  --default=value\t\tSet the default value of this option to be\n\t\t\t\tdisplayed when unset. Defaults to 'none'." },
     { "index", DEVICE_INDEX, 1, "  --index=name\t\t\tSet the index of this option within a set of\n\t\t\t\toptions. If set to a positive integer starting\n\t\t\t\tfrom zero, this option will be inserted at the\n\t\t\t\tgiven index and higher options moved one up to\n\t\t\t\tfit. If unset, or if larger than the index of\n\t\t\t\tthe last option, this option will be set as the\n\t\t\t\tlast option and others moved down to fit. If\n\t\t\t\tnegative, the option will be inserted at the\n\t\t\t\tend counting backwards." },
 #if 0
     { "unique", DEVICE_UNIQUE, 1, "  --unique=name[,name]\tForce the set of options to be unique. A search will be performed of the given options, and if found, the attempt to add or set will fail." },

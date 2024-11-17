@@ -452,7 +452,7 @@ static const apr_getopt_option_t
     { "version", 'v', 0,
         "  -v, --version\t\t\tDisplay the version number." },
     { "base", 'b', 1, "  -b, --base=path\t\tBase path in which to search for option files." },
-    { "complete", 'c', 0, "  -c, --complete\t\tPerform command line completion." },
+    { "complete", 'c', 0, "  -c, --complete\t\tOutput values so the device shell can perform\n\t\t\t\tcommand line completion. Each completion is\n\t\t\t\tprefixed with '-' for optional completions and\n\t\t\t\t'*' for required completions. All non-prefixed\n\t\t\t\tstrings are ignored." },
     { "optional", DEVICE_OPTIONAL, 0, "  --optional\t\t\tOptions declared after this are optional. This\n\t\t\t\tis the default." },
     { "required", DEVICE_REQUIRED, 0, "  --required\t\t\tOptions declared after this are required." },
     { "add", 'a', 1, "  -a, --add=name\t\tAdd a new set of options, named by the key\n\t\t\t\tspecified, which becomes required. A file \n\t\t\t\tcalled '" DEVICE_ADD_MARKER "' will be created in the newly\n\t\t\t\tcreated directory to indicate the directory\n\t\t\t\tshould be processed." },

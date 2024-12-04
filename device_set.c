@@ -27,6 +27,7 @@
 #include <apr_lib.h>
 #include <apr_hash.h>
 #include <apr_strings.h>
+#include <apr_thread_proc.h>
 #include <apr_uri.h>
 #include <apr_uuid.h>
 #include <apr_xlate.h>
@@ -134,6 +135,7 @@
 #define DEVICE_SHOW_INDEX 324
 #define DEVICE_SHOW_FLAGS 325
 #define DEVICE_SHOW_TABLE 326
+#define DEVICE_EXEC_COMMAND 327
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -157,6 +159,7 @@ typedef enum device_mode_e {
     DEVICE_RENAME,
     DEVICE_SHOW,
     DEVICE_LIST,
+    DEVICE_EXEC,
 } device_mode_e;
 
 typedef struct device_set_t {
@@ -188,6 +191,7 @@ typedef struct device_set_t {
     const char *relation_suffix;
     int relation_suffix_len;
     apr_hash_t *schemes;
+    char ** argv;
     device_mode_e mode;
 } device_set_t;
 
@@ -461,7 +465,10 @@ static const apr_getopt_option_t
     { "set", 's', 1, "  -s, --set=name\t\tSet an option among a set of options, named by\n\t\t\t\tthe key specified. A file called '" DEVICE_SET_MARKER "' is\n\t\t\t\tcreated to indicate that settings should be\n\t\t\t\tprocessed for update." },
     { "rename", 'n', 1, "  -n, --rename=name\t\tRename an option among a set of options, named by\n\t\t\t\tthe key specified. Other options may be set at\n\t\t\t\tthe same time. A file called '" DEVICE_SET_MARKER "' is\n\t\t\t\tcreated to indicate that settings should be\n\t\t\t\tprocessed for update." },
     { "reindex", 'r', 1, "  -r, --reindex=name\t\tReindex all options of type index, removing gaps\n\t\t\t\tin numbering. Multiple indexes can be specified\n\t\t\t\tat the same time." },
-    { "show", 'g', 1, "  -g, --show=name\t\tShow options in a set of options. To show\n\t\t\t\tunindexed options in the current directory,\n\t\t\t\tspecify '-'." },
+    { "show", 'g', 1, "  -g, --show=name\t\tShow options in a set of options, named by\n\t\t\t\tthe key specified. To show\n\t\t\t\tunindexed options in the current directory,\n\t\t\t\tspecify '-'." },
+#if 1
+    { "exec", 'e', 1, "  -e, --exec\t\t\tPass the options in a set of options to an\n\t\t\t\texecutable, named by the key specified. To pass\n\t\t\t\tunindexed options in the current directory,\n\t\t\t\tspecify '-'. The options are written to\n\t\t\t\tenvironment variables prefixed with 'DEVICE_'\n\t\t\t\tand passed to the executable defined with\n\t\t\t\t--exec-command." },
+#endif
 #if 0
     { "list", 'l', 0, "  -l, --list\t\t\tList the options in a set of options." },
 #endif
@@ -490,7 +497,7 @@ static const apr_getopt_option_t
 #if 0
     { "symlink-magic", DEVICE_SYMLINK_MAGIC, 1, "  --symlink-magic=magic\tLimit targets for symbolic links to this magic file definition." },
 #endif
-    { "symlink-recursive", DEVICE_SYMLINK_RECURSIVE, 0, "  --symlink-recursive\tAllow targets for symbolic links to exist recursively within a directory tree." },
+    { "symlink-recursive", DEVICE_SYMLINK_RECURSIVE, 0, "  --symlink-recursive\t\tAllow targets for symbolic links to exist\n\t\t\t\trecursively within a directory tree." },
     { "symlink", DEVICE_SYMLINK, 1, "  --symlink=name\t\tParse a selection from a list of files or\n\t\t\t\tdirectories matching the symlink-path, and save\n\t\t\t\tthe result as a symlink. If optional, the special\n\t\t\t\tvalue 'none' is accepted to mean no symlink." },
     { "sql-id", DEVICE_SQL_IDENTIFIER, 1, "  --sql-id=id\t\t\tSQL identifier in regular format. Regular\n\t\t\t\tidentifiers start with a letter (a-z, but also\n\t\t\t\tletters with diacritical marks and non-Latin\n\t\t\t\tletters) or an underscore (_). Subsequent\n\t\t\t\tcharacters in an identifier can be letters,\n\t\t\t\tunderscores, or digits (0-9). The resulting value\n\t\t\t\tdoes not need to be SQL escaped before use." },
     { "sql-delimited-id", DEVICE_SQL_DELIMITED_IDENTIFIER, 1, "  --sql-delimited-id=id\t\tSQL identifier in delimited format. Delimited\n\t\t\t\tidentifiers consist of any UTF8 non-zero character.\n\t\t\t\tThe resulting value must be SQL escaped separately\n\t\t\t\tbefore use." },
@@ -541,11 +548,12 @@ static const apr_getopt_option_t
 #if 0
     { "address-noquotes", DEVICE_ADDRESS_NOQUOTES, 1, "  --address-noquotes=[yes|no]\tDo not allow quoted literals in email addresses." },
 #endif
-    { "address-filesafe", DEVICE_ADDRESS_FILESAFE, 1, "  --address-filesafe=[yes|no]\tDo not allow characters in email addresses that would be\n\t\t\t\tunsafe in a filename. This excludes the characters '/'\n\t\t\t\tand '\\'." },
-    { "flag", DEVICE_FLAG, 1, "  --flag=chars\tWhen showing a table, use the specified character(s) to indicate the flag is set." },
-    { "show-index", DEVICE_SHOW_INDEX, 1, "  --show-index=name[,name...]\tWhen showing a table, show the specified indexes as the opening columns." },
-    { "show-flags", DEVICE_SHOW_FLAGS, 1, "  --show-flags=name[,name...]\tWhen showing a table, show the specified polars or switches as flags." },
-    { "show-table", DEVICE_SHOW_TABLE, 1, "  --show-table=name[,name...]\tWhen showing a table, show the specified entries in the given order." },
+    { "address-filesafe", DEVICE_ADDRESS_FILESAFE, 1, "  --address-filesafe=[yes|no]\tDo not allow characters in email addresses that\n\t\t\t\twould be unsafe in a filename. This excludes the\n\t\t\t\tcharacters '/' and '\\'." },
+    { "flag", DEVICE_FLAG, 1, "  --flag=chars\t\t\tWhen showing a table, use the specified\n\t\t\t\tcharacter(s) to indicate the flag is set." },
+    { "show-index", DEVICE_SHOW_INDEX, 1, "  --show-index=name[,name...]\tWhen showing a table, show the specified indexes\n\t\t\t\t~as the opening columns." },
+    { "show-flags", DEVICE_SHOW_FLAGS, 1, "  --show-flags=name[,name...]\tWhen showing a table, show the specified polars\n\t\t\t\tor switches as flags." },
+    { "show-table", DEVICE_SHOW_TABLE, 1, "  --show-table=name[,name...]\tWhen showing a table, show the specified entries\n\t\t\t\tin the given order." },
+    { "exec-command", DEVICE_EXEC_COMMAND, 1, "  --exec-command='cmd[ args]'\tRun the given command, parsing any options\n\t\t\t\tspecified. Option values are passed as\n\t\t\t\tenvironment variables prefixed with 'DEVICE_'.\n\t\t\t\tSee --exec." },
     { NULL }
 };
 
@@ -5393,6 +5401,127 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 
 }
 
+static apr_status_t device_command(device_set_t *ds, apr_array_header_t *files)
+{
+
+    apr_array_header_t *env = apr_array_make(ds->pool, 2, sizeof(const char *));
+
+    apr_procattr_t *procattr;
+    apr_proc_t *proc;
+
+    apr_status_t status = APR_SUCCESS;
+    int i, j;
+    int exitcode = 0;
+    apr_exit_why_e exitwhy = 0;
+
+#define DEVICE_ENVIRON_ADD(env,var) \
+    { \
+        const char *entry; \
+        if ((entry = getenv(var))) { \
+            const char **e = apr_array_push(env); \
+            *e = apr_psprintf(ds->pool, "%s=%s", var, entry);  \
+        } \
+    }        /* last line of macro... */
+
+    if (ds->key) {
+
+        /* change current working directory */
+        status = apr_filepath_set(ds->keypath, ds->pool);
+
+        if (APR_SUCCESS != status) {
+            apr_file_printf(ds->err, "cannot access '%s': %pm\n", ds->key, &status);
+            return status;
+        }
+
+    }
+
+    /*
+     * Pass a sanitised list of variables from the environment.
+     *
+     * No PATH = we don't want anything outside device affecting the
+     * binaries being executed.
+     *
+     * No EDITOR/PAGER, as these could have callout capabilities and
+     * we must avoid that.
+     */
+
+    DEVICE_ENVIRON_ADD(env, "TERM")
+    DEVICE_ENVIRON_ADD(env, "LANG")
+    DEVICE_ENVIRON_ADD(env, "LC_ALL")
+    DEVICE_ENVIRON_ADD(env, "TMPDIR")
+    DEVICE_ENVIRON_ADD(env, "TZ")
+    DEVICE_ENVIRON_ADD(env, "USER")
+
+
+    /* set up environment */
+    for (i = 0; i < files->nelts; i++)
+    {
+        device_file_t *file = &APR_ARRAY_IDX(files, i, device_file_t);
+
+        char *var = apr_pstrcat(ds->pool, "DEVICE_", file->key, NULL);
+
+        for (j = 7; var && var[j]; j++) {
+            var[j] = apr_toupper(var[j]);
+        }
+
+        if (!file->val) {
+
+            /* no value, leave unset */
+
+        }
+        else if (file->type == APR_REG) {
+
+            const char **e = apr_array_push(env);
+            *e = apr_psprintf(ds->pool, "%s=%s", var, file->val);
+
+        }
+        else if (file->type == APR_LNK) {
+
+            const char **e = apr_array_push(env);
+            *e = apr_psprintf(ds->pool, "%s=%s", var, file->link);
+
+        }
+
+    }
+
+    apr_array_push(env);
+
+    if ((status = apr_procattr_create(&procattr, ds->pool)) != APR_SUCCESS) {
+        apr_file_printf(ds->err, "cannot create procattr: %pm\n", &status);
+        return status;
+    }
+
+    if ((status = apr_procattr_cmdtype_set(procattr, APR_PROGRAM)) != APR_SUCCESS) {
+        apr_file_printf(ds->err, "cannot set command type in procattr: %pm\n", &status);
+        return status;
+    }
+
+    proc = apr_pcalloc(ds->pool, sizeof(apr_proc_t));
+    if ((status = apr_proc_create(proc, ds->argv[0], (const char* const*) ds->argv,
+            (const char* const*) env->elts, procattr, ds->pool)) != APR_SUCCESS) {
+        apr_file_printf(ds->err, "cannot run command: %pm\n", &status);
+        return status;
+    }
+
+    if ((status = apr_proc_wait(proc, &exitcode, &exitwhy, APR_WAIT)) != APR_CHILD_DONE) {
+        apr_file_printf(ds->err, "cannot wait for command: %pm\n", &status);
+        return status;
+    }
+
+    if (exitcode != 0 || exitwhy != APR_PROC_EXIT) {
+        if (exitwhy != APR_PROC_EXIT) {
+            apr_file_printf(ds->err, "command exited %s with code %d\n",
+                    APR_PROC_CHECK_EXIT(exitwhy) ? "normally" :
+                    APR_PROC_CHECK_SIGNALED(exitwhy) ? "on signal" :
+                    APR_PROC_CHECK_CORE_DUMP(exitwhy) ? "and dumped core" : "",
+                    exitcode);
+        }
+        return APR_EGENERAL;
+    }
+
+    return APR_SUCCESS;
+}
+
 static apr_status_t device_complete(device_set_t *ds, const char **args)
 {
     const char *key = NULL, *value = NULL;
@@ -7432,6 +7561,78 @@ static apr_status_t device_reindex(device_set_t *ds, const char **args)
     return status;
 }
 
+static apr_status_t device_exec(device_set_t *ds, const char **args)
+{
+    const char *key = NULL, *val = NULL;
+    apr_status_t status = APR_SUCCESS;
+    int len;
+
+    for (len = 0; args && args[len]; len++);
+
+    apr_array_header_t *files = apr_array_make(ds->pool, len, sizeof(device_file_t));
+
+    if (ds->key) {
+
+        if (!args[0] || !args[1]) {
+            apr_file_printf(ds->err, "%s is required.\n", ds->key);
+            return APR_EINVAL;
+        }
+        else {
+
+            int exact = 0;
+
+            apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+
+            status = device_get(ds, args[0], options, &ds->keyval, &ds->keypath, &exact);
+
+            if (APR_SUCCESS != status) {
+                return status;
+            }
+
+            if (!exact) {
+                apr_file_printf(ds->err, "%s was not found.\n", args[0]);
+                return APR_EINVAL;
+            }
+        }
+
+        args += 2;
+    }
+
+    while (args && *args) {
+
+        const char *arg = *(args++);
+
+        if (!key) {
+            key = arg;
+            continue;
+        }
+        else {
+            val = arg;
+        }
+
+        status = device_parse(ds, key, val, files);
+
+        if (APR_SUCCESS != status) {
+            break;
+        }
+
+        key = NULL;
+        val = NULL;
+    }
+
+    if (key && !val) {
+        apr_file_printf(ds->err, "argument '%s' has no corresponding value.\n",
+                apr_pescape_echo(ds->pool, key, 1));
+        return APR_EINVAL;
+    }
+
+    if (APR_SUCCESS == status) {
+        status = device_command(ds, files);
+    }
+
+    return status;
+}
+
 int main(int argc, const char * const argv[])
 {
     apr_getopt_t *opt;
@@ -7568,6 +7769,13 @@ int main(int argc, const char * const argv[])
         }
         case 'l': {
             ds.mode = DEVICE_LIST;
+            break;
+        }
+        case 'e': {
+            ds.mode = DEVICE_EXEC;
+            if (optarg[0] != '-') {
+                ds.key = optarg;
+            }
             break;
         }
         case 'v': {
@@ -8554,6 +8762,22 @@ int main(int argc, const char * const argv[])
 
             break;
         }
+        case DEVICE_EXEC_COMMAND: {
+
+            if (APR_SUCCESS != apr_tokenize_to_argv(optarg, &ds.argv, ds.pool)) {
+                apr_file_printf(ds.err, "command '%s': cannot be tokenised.\n",
+                        apr_pescape_echo(ds.pool, optarg, 1));
+                exit(2);
+            }
+
+            if (!ds.argv[0]) {
+                apr_file_printf(ds.err, "command '%s': cannot be empty.\n",
+                        apr_pescape_echo(ds.pool, optarg, 1));
+                exit(2);
+            }
+
+            break;
+        }
         }
 
         if (complete) {
@@ -8690,6 +8914,13 @@ int main(int argc, const char * const argv[])
         }
     }
 
+    if (ds.mode == DEVICE_EXEC) {
+        if (!ds.argv) {
+            return help(ds.err, argv[0], "The --exec-command parameter was not found on the command line.",
+                    EXIT_FAILURE, cmdline_opts);
+        }
+    }
+
     if (complete) {
 
         status = device_complete(&ds, opt->argv + opt->ind);
@@ -8748,6 +8979,14 @@ int main(int argc, const char * const argv[])
     else if (ds.mode == DEVICE_SHOW) {
 
         status = device_show(&ds, opt->argv + opt->ind);
+
+        if (APR_SUCCESS != status) {
+            exit(1);
+        }
+    }
+    else if (ds.mode == DEVICE_EXEC) {
+
+        status = device_exec(&ds, opt->argv + opt->ind);
 
         if (APR_SUCCESS != status) {
             exit(1);

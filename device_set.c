@@ -8883,9 +8883,9 @@ int main(int argc, const char * const argv[])
         }
     }
 
-    if (ds.mode == DEVICE_EXEC) {
+    if (ds.mode == DEVICE_EXEC && !complete) {
         if (!ds.argv) {
-            return help(ds.err, argv[0], "The --exec-command parameter was not found on the command line.",
+            return help(ds.err, argv[0], "The --command parameter was not found on the command line.",
                     EXIT_FAILURE, cmdline_opts);
         }
     }

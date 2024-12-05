@@ -5415,6 +5415,14 @@ static apr_status_t device_command(device_set_t *ds, apr_array_header_t *files)
 
     if (ds->key) {
 
+        char *var = apr_pstrcat(ds->pool, "DEVICE_", ds->key, NULL);
+
+        for (j = 7; var && var[j]; j++) {
+            var[j] = apr_toupper(var[j]);
+        }
+
+        apr_env_set(var, ds->key, ds->pool);
+
         /* change current working directory */
         status = apr_filepath_set(ds->keypath, ds->pool);
 
@@ -5422,6 +5430,7 @@ static apr_status_t device_command(device_set_t *ds, apr_array_header_t *files)
             apr_file_printf(ds->err, "cannot access '%s': %pm\n", ds->key, &status);
             return status;
         }
+
 
     }
 
@@ -7548,12 +7557,20 @@ static apr_status_t device_exec(device_set_t *ds, const char **args)
         }
         else {
 
-            status = device_parse(ds, ds->key, args[0], files);
+            int exact = 0;
+
+            apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+
+            status = device_get(ds, args[0], options, &ds->keyval, &ds->keypath, &exact);
 
             if (APR_SUCCESS != status) {
                 return status;
             }
 
+            if (!exact) {
+                apr_file_printf(ds->err, "%s was not found.\n", args[0]);
+                return APR_EINVAL;
+            }
         }
 
         args += 2;

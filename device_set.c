@@ -21,6 +21,7 @@
  */
 
 #include <apr.h>
+#include <apr_env.h>
 #include <apr_escape.h>
 #include <apr_file_io.h>
 #include <apr_getopt.h>
@@ -135,7 +136,7 @@
 #define DEVICE_SHOW_INDEX 324
 #define DEVICE_SHOW_FLAGS 325
 #define DEVICE_SHOW_TABLE 326
-#define DEVICE_EXEC_COMMAND 327
+#define DEVICE_COMMAND 327
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -553,7 +554,7 @@ static const apr_getopt_option_t
     { "show-index", DEVICE_SHOW_INDEX, 1, "  --show-index=name[,name...]\tWhen showing a table, show the specified indexes\n\t\t\t\t~as the opening columns." },
     { "show-flags", DEVICE_SHOW_FLAGS, 1, "  --show-flags=name[,name...]\tWhen showing a table, show the specified polars\n\t\t\t\tor switches as flags." },
     { "show-table", DEVICE_SHOW_TABLE, 1, "  --show-table=name[,name...]\tWhen showing a table, show the specified entries\n\t\t\t\tin the given order." },
-    { "exec-command", DEVICE_EXEC_COMMAND, 1, "  --exec-command='cmd[ args]'\tRun the given command, parsing any options\n\t\t\t\tspecified. Option values are passed as\n\t\t\t\tenvironment variables prefixed with 'DEVICE_'.\n\t\t\t\tSee --exec." },
+    { "command", DEVICE_COMMAND, 1, "  --command='cmd[ args]'\tRun the given command, parsing any options\n\t\t\t\tspecified. Option values are passed as\n\t\t\t\tenvironment variables prefixed with 'DEVICE_'.\n\t\t\t\tSee --exec." },
     { NULL }
 };
 
@@ -5404,8 +5405,6 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 static apr_status_t device_command(device_set_t *ds, apr_array_header_t *files)
 {
 
-    apr_array_header_t *env = apr_array_make(ds->pool, 2, sizeof(const char *));
-
     apr_procattr_t *procattr;
     apr_proc_t *proc;
 
@@ -5413,15 +5412,6 @@ static apr_status_t device_command(device_set_t *ds, apr_array_header_t *files)
     int i, j;
     int exitcode = 0;
     apr_exit_why_e exitwhy = 0;
-
-#define DEVICE_ENVIRON_ADD(env,var) \
-    { \
-        const char *entry; \
-        if ((entry = getenv(var))) { \
-            const char **e = apr_array_push(env); \
-            *e = apr_psprintf(ds->pool, "%s=%s", var, entry);  \
-        } \
-    }        /* last line of macro... */
 
     if (ds->key) {
 
@@ -5434,23 +5424,6 @@ static apr_status_t device_command(device_set_t *ds, apr_array_header_t *files)
         }
 
     }
-
-    /*
-     * Pass a sanitised list of variables from the environment.
-     *
-     * No PATH = we don't want anything outside device affecting the
-     * binaries being executed.
-     *
-     * No EDITOR/PAGER, as these could have callout capabilities and
-     * we must avoid that.
-     */
-
-    DEVICE_ENVIRON_ADD(env, "TERM")
-    DEVICE_ENVIRON_ADD(env, "LANG")
-    DEVICE_ENVIRON_ADD(env, "LC_ALL")
-    DEVICE_ENVIRON_ADD(env, "TMPDIR")
-    DEVICE_ENVIRON_ADD(env, "TZ")
-    DEVICE_ENVIRON_ADD(env, "USER")
 
 
     /* set up environment */
@@ -5471,34 +5444,30 @@ static apr_status_t device_command(device_set_t *ds, apr_array_header_t *files)
         }
         else if (file->type == APR_REG) {
 
-            const char **e = apr_array_push(env);
-            *e = apr_psprintf(ds->pool, "%s=%s", var, file->val);
+            apr_env_set(var, file->val, ds->pool);
 
         }
         else if (file->type == APR_LNK) {
 
-            const char **e = apr_array_push(env);
-            *e = apr_psprintf(ds->pool, "%s=%s", var, file->link);
+            apr_env_set(var, file->link, ds->pool);
 
         }
 
     }
-
-    apr_array_push(env);
 
     if ((status = apr_procattr_create(&procattr, ds->pool)) != APR_SUCCESS) {
         apr_file_printf(ds->err, "cannot create procattr: %pm\n", &status);
         return status;
     }
 
-    if ((status = apr_procattr_cmdtype_set(procattr, APR_PROGRAM)) != APR_SUCCESS) {
+    if ((status = apr_procattr_cmdtype_set(procattr, APR_PROGRAM_ENV)) != APR_SUCCESS) {
         apr_file_printf(ds->err, "cannot set command type in procattr: %pm\n", &status);
         return status;
     }
 
     proc = apr_pcalloc(ds->pool, sizeof(apr_proc_t));
     if ((status = apr_proc_create(proc, ds->argv[0], (const char* const*) ds->argv,
-            (const char* const*) env->elts, procattr, ds->pool)) != APR_SUCCESS) {
+            NULL, procattr, ds->pool)) != APR_SUCCESS) {
         apr_file_printf(ds->err, "cannot run command: %pm\n", &status);
         return status;
     }
@@ -8762,7 +8731,7 @@ int main(int argc, const char * const argv[])
 
             break;
         }
-        case DEVICE_EXEC_COMMAND: {
+        case DEVICE_COMMAND: {
 
             if (APR_SUCCESS != apr_tokenize_to_argv(optarg, &ds.argv, ds.pool)) {
                 apr_file_printf(ds.err, "command '%s': cannot be tokenised.\n",

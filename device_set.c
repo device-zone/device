@@ -5535,7 +5535,7 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
         return APR_EINVAL;
     }
 
-    if (ds->key && (ds->mode == DEVICE_SET || ds->mode == DEVICE_RENAME)) {
+    if (ds->key && (ds->mode == DEVICE_SET || ds->mode == DEVICE_RENAME || ds->mode == DEVICE_EXEC)) {
 
         apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
         int i;

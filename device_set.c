@@ -5421,7 +5421,7 @@ static apr_status_t device_command(device_set_t *ds, apr_array_header_t *files)
             var[j] = apr_toupper(var[j]);
         }
 
-        apr_env_set(var, ds->key, ds->pool);
+        apr_env_set(var, ds->keyval, ds->pool);
 
         /* change current working directory */
         status = apr_filepath_set(ds->keypath, ds->pool);

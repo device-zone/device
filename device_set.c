@@ -7548,20 +7548,12 @@ static apr_status_t device_exec(device_set_t *ds, const char **args)
         }
         else {
 
-            int exact = 0;
-
-            apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
-
-            status = device_get(ds, args[0], options, &ds->keyval, &ds->keypath, &exact);
+            status = device_parse(ds, ds->key, args[0], files);
 
             if (APR_SUCCESS != status) {
                 return status;
             }
 
-            if (!exact) {
-                apr_file_printf(ds->err, "%s was not found.\n", args[0]);
-                return APR_EINVAL;
-            }
         }
 
         args += 2;

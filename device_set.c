@@ -6645,6 +6645,7 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
                 apr_file_printf(ds->err,
                         "option set '%s' does not exist beneath bases.\n", pair->key);
                 status = APR_EGENERAL;
+                break;
             }
 
             if (!pair->s.symlink_recursive && size && val[0] == '/') {

@@ -7126,7 +7126,7 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
             table = &APR_ARRAY_IDX(ds->show_flags, j, device_table_t);
 
             if (j) {
-                apr_file_puts(",", ds->out);
+                apr_file_puts(", ", ds->out);
             }
 
             if (table->pair->flags) {
@@ -7135,7 +7135,7 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
                     device_flag_t *flag = &APR_ARRAY_IDX(table->pair->flags, k, device_flag_t);
 
                     if (k) {
-                        apr_file_puts(",", ds->out);
+                        apr_file_puts(", ", ds->out);
                     }
 
                     if (flag->flag) {

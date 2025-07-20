@@ -65,6 +65,10 @@
 #if HAVE_LIBGEN_H
 #include <libgen.h>
 #endif
+#if HAVE_DBUS_DBUS_H
+#include <dbus/dbus.h>
+#endif
+#include <regex.h>
 
 #define DEVICE_OPTIONAL 257
 #define DEVICE_REQUIRED 258
@@ -132,11 +136,20 @@
 #define DEVICE_ADDRESS_MAX 320
 #define DEVICE_ADDRESS_NOQUOTES 321
 #define DEVICE_ADDRESS_FILESAFE 322
-#define DEVICE_FLAG 323
-#define DEVICE_SHOW_INDEX 324
-#define DEVICE_SHOW_FLAGS 325
-#define DEVICE_SHOW_TABLE 326
-#define DEVICE_COMMAND 327
+#define DEVICE_SYSTEMD_PARAMETER 323
+#define DEVICE_SYSTEMD_PREFIX 324
+#define DEVICE_SYSTEMD_NAME 325
+#define DEVICE_SYSTEMD_SUFFIX 326
+#define DEVICE_SYSTEMD_UNIT 327
+#define DEVICE_SYSTEMD_SERVICE 328
+#define DEVICE_SYSTEMD_TARGET 329
+#define DEVICE_FLAG 330
+#define DEVICE_FLAG_DESC 331
+#define DEVICE_FLAG_MATCH 332
+#define DEVICE_SHOW_INDEX 333
+#define DEVICE_SHOW_FLAGS 334
+#define DEVICE_SHOW_TABLE 335
+#define DEVICE_COMMAND 336
 
 #define DEVICE_INDEX_SUFFIX ".txt"
 #define DEVICE_TXT_SUFFIX ".txt"
@@ -191,6 +204,10 @@ typedef struct device_set_t {
     int relation_prefix_len;
     const char *relation_suffix;
     int relation_suffix_len;
+#if HAVE_DBUS_DBUS_H
+    DBusError dbus_err;
+    DBusConnection *dbus_conn;
+#endif
     apr_hash_t *schemes;
     char ** argv;
     device_mode_e mode;
@@ -228,10 +245,10 @@ typedef struct device_set_t {
 #define DEVICE_ADDRESS_MAX_DEFAULT 256
 #define DEVICE_ADDRESS_NOQUOTES_DEFAULT 1
 #define DEVICE_ADDRESS_FILESAFE_DEFAULT 0
-
 #define DEVICE_ADDRESS_LOCAL_PART_LIMIT 64
 #define DEVICE_ADDRESS_DOMAIN_LABEL_LIMIT 63
 #define DEVICE_ADDRESS_DOMAIN_LIMIT 255
+#define DEVICE_SYSTEMD_PARAMETER_DEFAULT "ActiveState"
 
 typedef enum device_pair_e {
     DEVICE_PAIR_INDEX,
@@ -265,6 +282,8 @@ typedef enum device_pair_e {
     DEVICE_PAIR_ADDRESS_LOCALPART,
     DEVICE_PAIR_ADDRESS_MAILBOX,
     DEVICE_PAIR_ADDRESS_ADDRSPEC,
+    DEVICE_PAIR_SYSTEMD_SERVICE,
+    DEVICE_PAIR_SYSTEMD_TARGET,
 } device_pair_e;
 
 typedef enum device_optional_e {
@@ -382,11 +401,21 @@ typedef struct device_pair_address_t {
     apr_uint64_t max;
 } device_pair_address_t;
 
+typedef struct device_pair_systemd_t {
+    const char *parameter;
+    const char *prefix;
+    const char *name;
+    const char *suffix;
+    const char *unit;
+} device_pair_systemd_t;
+
 typedef struct device_pair_t {
     const char *key;
     const char *suffix;
     const char *flag;
+    const char *flag_desc;
     const char *unset;
+    apr_array_header_t *flags;
     device_pair_e type;
     device_optional_e optional;
     device_unique_e unique;
@@ -407,6 +436,7 @@ typedef struct device_pair_t {
         device_pair_url_path_t up;
         device_pair_uri_t uri;
         device_pair_address_t a;
+        device_pair_systemd_t sd;
     };
 } device_pair_t;
 
@@ -448,6 +478,12 @@ typedef struct device_row_t {
     const char *keyval;
     apr_int64_t order;
 } device_row_t;
+
+typedef struct device_flag_t {
+    const char *flag;
+    const char *desc;
+    regex_t regex;
+} device_flag_t;
 
 static const apr_getopt_option_t
     cmdline_opts[] =
@@ -550,13 +586,24 @@ static const apr_getopt_option_t
     { "address-noquotes", DEVICE_ADDRESS_NOQUOTES, 1, "  --address-noquotes=[yes|no]\tDo not allow quoted literals in email addresses." },
 #endif
     { "address-filesafe", DEVICE_ADDRESS_FILESAFE, 1, "  --address-filesafe=[yes|no]\tDo not allow characters in email addresses that\n\t\t\t\twould be unsafe in a filename. This excludes the\n\t\t\t\tcharacters '/' and '\\'." },
+    { "systemd-parameter", DEVICE_SYSTEMD_PARAMETER, 1, "  --systemd-parameter=param\tName of a systemd unit parameter. Defaults to\n\t\t\t\t" DEVICE_SYSTEMD_PARAMETER_DEFAULT "." },
+    { "systemd-prefix", DEVICE_SYSTEMD_PREFIX, 1, "  --systemd-prefix=prefix\tIf specified, systemd unit name is a\n\t\t\t\tconcatenation of prefix, value of file by name\n\t\t\t\t(or UUID if --system-name is unspecified), and\n\t\t\t\tsuffix." },
+    { "systemd-name", DEVICE_SYSTEMD_NAME, 1, "  --systemd-name=name\t\tIf specified, systemd unit name is a\n\t\t\t\tconcatenation of prefix, value of file by name,\n\t\t\t\tand suffix." },
+    { "systemd-suffix", DEVICE_SYSTEMD_SUFFIX, 1, "  --systemd-suffix=suffix\tIf specified, systemd unit name is a\n\t\t\t\tconcatenation of prefix, value of file by name\n\t\t\t\t(or UUID if --system-name is unspecified), and\n\t\t\t\tsuffix." },
+    { "systemd-unit", DEVICE_SYSTEMD_UNIT, 1, "  --systemd-unit=unit\t\tIf specified, the full systemd unit name.\n\t\t\t\tOverrides --systemd-name above." },
+    { "systemd-service", DEVICE_SYSTEMD_SERVICE, 1, "  --systemd-service=name\tRead only access to a systemd service parameter." },
+    { "systemd-target", DEVICE_SYSTEMD_TARGET, 1, "  --systemd-target=name\t\tRead only access to a systemd target parameter." },
     { "flag", DEVICE_FLAG, 1, "  --flag=chars\t\t\tWhen showing a table, use the specified\n\t\t\t\tcharacter(s) to indicate the flag is set." },
+    { "flag-description", DEVICE_FLAG_DESC, 1, "  --flag-description=text\tWhen showing a table, set the description\n\t\t\t\tcorresponding to the flag." },
+    { "flag-match", DEVICE_FLAG_MATCH, 1, "  --flag-match=regex\t\tWhen showing a table, treat a regex match with\n\t\t\t\tthe value as the flag being set." },
     { "show-index", DEVICE_SHOW_INDEX, 1, "  --show-index=name[,name...]\tWhen showing a table, show the specified indexes\n\t\t\t\t~as the opening columns." },
     { "show-flags", DEVICE_SHOW_FLAGS, 1, "  --show-flags=name[,name...]\tWhen showing a table, show the specified polars\n\t\t\t\tor switches as flags." },
     { "show-table", DEVICE_SHOW_TABLE, 1, "  --show-table=name[,name...]\tWhen showing a table, show the specified entries\n\t\t\t\tin the given order." },
     { "command", DEVICE_COMMAND, 1, "  --command='cmd[ args]'\tRun the given command, parsing any options\n\t\t\t\tspecified. Option values are passed as\n\t\t\t\tenvironment variables prefixed with 'DEVICE_'.\n\t\t\t\tSee --exec." },
     { NULL }
 };
+
+
 
 static int help(apr_file_t *out, const char *name, const char *msg, int code,
         const apr_getopt_option_t opts[])
@@ -5035,6 +5082,8 @@ static apr_status_t device_get(device_set_t *ds, const char *arg,
             case DEVICE_PAIR_URI:
             case DEVICE_PAIR_URI_ABSOLUTE:
             case DEVICE_PAIR_URI_RELATIVE:
+            case DEVICE_PAIR_SYSTEMD_SERVICE:
+            case DEVICE_PAIR_SYSTEMD_TARGET:
                 /* support me */
                 apr_pool_destroy(pool);
                 continue;
@@ -5683,6 +5732,10 @@ static apr_status_t device_complete(device_set_t *ds, const char **args)
             case DEVICE_PAIR_ADDRESS_LOCALPART:
                 status = device_parse_address_localpart(ds, pair, value, options, NULL);
                 break;
+            case DEVICE_PAIR_SYSTEMD_SERVICE:
+            case DEVICE_PAIR_SYSTEMD_TARGET:
+                status = APR_ENOTIMPL;
+                break;
             }
 
             for (i = 0; i < options->nelts; i++) {
@@ -6092,6 +6145,10 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
             break;
         case DEVICE_PAIR_ADDRESS_LOCALPART:
             status = device_parse_address_localpart(ds, pair, val, options, &val);
+            break;
+        case DEVICE_PAIR_SYSTEMD_SERVICE:
+        case DEVICE_PAIR_SYSTEMD_TARGET:
+            status = APR_ENOTIMPL;
             break;
         }
 
@@ -6769,6 +6826,179 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         break;
 
     }
+    case DEVICE_PAIR_SYSTEMD_SERVICE:
+    case DEVICE_PAIR_SYSTEMD_TARGET: {
+
+#if HAVE_DBUS_DBUS_H
+
+        DBusMessage *msg, *reply;
+        DBusMessageIter args;
+        DBusMessageIter variant;
+
+        const char *suffix = NULL;
+        const char *unit = NULL;
+        char *unit_path = NULL;
+
+        if (!ds->dbus_conn) {
+            status = APR_EGENERAL;
+            break;
+        }
+
+        switch (pair->type) {
+        case DEVICE_PAIR_SYSTEMD_SERVICE:
+            suffix = ".service";
+               break;
+        case DEVICE_PAIR_SYSTEMD_TARGET:
+            suffix = ".target";
+               break;
+        default:
+            break;
+        }
+
+        if (pair->sd.unit) {
+            unit = apr_pstrcat(ds->pool, pair->sd.unit, suffix, NULL);
+        }
+        else if (pair->sd.name) {
+
+            apr_array_header_t *values = apr_array_make(ds->pool,
+                    16, sizeof(device_value_t));
+
+            int max = 0;
+
+            device_pair_t *indexpair = apr_hash_get(ds->pairs, pair->sd.name, APR_HASH_KEY_STRING);
+            if (!indexpair) {
+                apr_file_printf(ds->err, "option key '%s' does not exist.\n",
+                        pair->sd.name);
+                status = APR_ENOENT;
+                break;
+            }
+            else if (pair == indexpair) {
+                apr_file_printf(ds->err, "option key '%s' refers to itself.\n",
+                        pair->sd.name);
+                status = APR_EINVAL;
+                break;
+            }
+
+            status = device_value(ds, indexpair, keypath, values, &val, NULL, &max);
+
+            if (APR_SUCCESS != status) {
+                break;
+            }
+
+            unit = apr_pstrcat(ds->pool, pair->sd.prefix ? pair->sd.prefix : "",
+                               val,
+                               pair->sd.suffix ? pair->sd.suffix : "",
+                               suffix, NULL);
+
+        }
+        else {
+            unit = apr_pstrcat(ds->pool, pair->sd.prefix ? pair->sd.prefix : "",
+                               keypath,
+                               pair->sd.suffix ? pair->sd.suffix : "",
+                               suffix, NULL);
+        }
+
+        msg = dbus_message_new_method_call(
+                "org.freedesktop.systemd1",
+                "/org/freedesktop/systemd1",
+                "org.freedesktop.systemd1.Manager",
+                "GetUnit");
+        if (!msg) {
+            apr_file_printf(ds->err, "cannot create dbus message '%s'\n",
+                    pair->key);
+            status = APR_EGENERAL;
+            break;
+        }
+
+        dbus_message_append_args(msg, DBUS_TYPE_STRING, &unit, DBUS_TYPE_INVALID);
+
+        reply = dbus_connection_send_with_reply_and_block(ds->dbus_conn, msg, -1, &ds->dbus_err);
+        dbus_message_unref(msg);
+
+        if (!reply) {
+            apr_file_printf(ds->err, "dbus systemd '%s': %s\n",
+                    pair->key, ds->dbus_err.message);
+            dbus_error_free(&ds->dbus_err);
+            status = APR_EGENERAL;
+            break;
+        }
+
+        if (!dbus_message_iter_init(reply, &args) ||
+                DBUS_TYPE_OBJECT_PATH != dbus_message_iter_get_arg_type(&args)) {
+            apr_file_printf(ds->err, "dbus systemd GetUnit did not contain object path '%s'\n",
+                    pair->key);
+            dbus_message_unref(reply);
+            status = APR_EGENERAL;
+            break;
+        }
+
+        dbus_message_iter_get_basic(&args, &unit_path);
+        dbus_message_unref(reply);
+
+        msg = dbus_message_new_method_call(
+                "org.freedesktop.systemd1",
+                unit_path,
+                "org.freedesktop.DBus.Properties",
+                "Get");
+
+        const char *iface = "org.freedesktop.systemd1.Unit";
+        dbus_message_append_args(
+                msg,
+                DBUS_TYPE_STRING, &iface,
+                DBUS_TYPE_STRING, &pair->sd.parameter,
+                DBUS_TYPE_INVALID);
+
+        reply = dbus_connection_send_with_reply_and_block(ds->dbus_conn, msg, -1, &ds->dbus_err);
+        dbus_message_unref(msg);
+
+        if (!reply) {
+            apr_file_printf(ds->err, "dbus systemd GetUnit did not contain object path '%s': %s\n",
+                    pair->key, ds->dbus_err.message);
+            dbus_message_unref(reply);
+            dbus_error_free(&ds->dbus_err);
+            status = APR_EGENERAL;
+            break;
+        }
+
+        if (!dbus_message_iter_init(reply, &args) ||
+            DBUS_TYPE_VARIANT != dbus_message_iter_get_arg_type(&args)) {
+            apr_file_printf(ds->err, "dbus systemd Get did not contain a variant '%s'\n",
+                    pair->key);
+            dbus_message_unref(reply);
+            status = APR_EGENERAL;
+            break;
+        }
+
+        dbus_message_iter_recurse(&args, &variant);
+        if (DBUS_TYPE_STRING != dbus_message_iter_get_arg_type(&variant)) {
+            apr_file_printf(ds->err, "dbus systemd response was not a string '%s'\n",
+                    pair->key);
+            dbus_message_unref(reply);
+            status = APR_EGENERAL;
+            break;
+        }
+
+        dbus_message_iter_get_basic(&variant, &val);
+        val = apr_pstrdup(ds->pool, val);
+        len = strlen(val);
+
+        dbus_message_unref(reply);
+        status = APR_SUCCESS;
+
+        value = apr_array_push(values);
+        value->pair = pair;
+        value->value = val;
+        value->len = len;
+        value->set = 1;
+
+        max[0] = max[0] > value->len ? max[0] : value->len;
+
+#else
+        status = APR_ENOTIMPL;
+#endif
+
+        break;
+    }
     }
 
     if (keyval && pair->key && ds->key && !strcmp(pair->key, ds->key)) {
@@ -6896,7 +7126,24 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
                 apr_file_puts(",", ds->out);
             }
 
-            if (table->pair->flag) {
+            if (table->pair->flags) {
+                for (k = 0; k < table->pair->flags->nelts; k++) {
+
+                    device_flag_t *flag = &APR_ARRAY_IDX(table->pair->flags, k, device_flag_t);
+
+                    if (k) {
+                        apr_file_puts(",", ds->out);
+                    }
+
+                    if (flag->flag) {
+                        apr_file_printf(ds->out, "%s (%s)", flag->desc ? flag->desc : table->pair->key, flag->flag);
+                    }
+                    else {
+                        apr_file_printf(ds->out, "%s", flag->desc ? flag->desc : table->pair->key);
+                    }
+                }
+            }
+            else if (table->pair->flag) {
                 apr_file_printf(ds->out, "%s (%s)", table->pair->key, table->pair->flag);
             } else {
                 apr_file_printf(ds->out, "%s", table->pair->key);
@@ -6921,6 +7168,19 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
 
             table = &APR_ARRAY_IDX(ds->show_flags, j, device_table_t);
 
+            if (table->pair->flags) {
+                for (k = 0; k < table->pair->flags->nelts; k++) {
+
+                    device_flag_t *flag = &APR_ARRAY_IDX(table->pair->flags, k, device_flag_t);
+
+                    if (flag->flag) {
+                        apr_file_printf(ds->out, "%*s", (int)strlen(flag->flag), "");
+                    }
+                    else {
+                        apr_file_puts(" ", ds->out);
+                    }
+                }
+            }
             if (table->pair->flag) {
                 apr_file_printf(ds->out, "%*s", (int)strlen(table->pair->flag), "");
             } else {
@@ -6965,7 +7225,31 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
             table = &APR_ARRAY_IDX(ds->show_flags, j, device_table_t);
             value = &APR_ARRAY_IDX(row->flags, j, device_value_t);
 
-            if (value->set) {
+            if (table->pair->flags) {
+                for (k = 0; k < table->pair->flags->nelts; k++) {
+
+                    device_flag_t *flag = &APR_ARRAY_IDX(table->pair->flags, k, device_flag_t);
+
+                    if (!regexec(&flag->regex, value->value, 0, NULL, 0)) {
+                        if (flag->flag) {
+                            apr_file_printf(ds->out, "%*s", (int)strlen(flag->flag),
+                                    flag->flag);
+                        }
+                        else {
+                            apr_file_puts(".", ds->out);
+                        }
+                    }
+                    else {
+                        if (flag->flag) {
+                            apr_file_printf(ds->out, "%*s", (int)strlen(flag->flag), "");
+                        }
+                        else {
+                            apr_file_puts(" ", ds->out);
+                        }
+                    }
+                }
+            }
+            else if (value->set) {
                 if (table->pair->flag) {
                     apr_file_printf(ds->out, "%*s", (int)strlen(table->pair->flag),
                             table->pair->flag);
@@ -7612,6 +7896,20 @@ static apr_status_t device_exec(device_set_t *ds, const char **args)
     return status;
 }
 
+static void device_dbus(device_set_t *ds)
+{
+#if HAVE_DBUS_DBUS_H
+    dbus_error_init(&ds->dbus_err);
+
+    ds->dbus_conn = dbus_bus_get(DBUS_BUS_SYSTEM, &ds->dbus_err);
+    if (!ds->dbus_conn) {
+        apr_file_printf(ds->err, "cannot open system dbus connection: %s\n",
+                ds->dbus_err.message);
+        dbus_error_free(&ds->dbus_err);
+    }
+#endif
+}
+
 int main(int argc, const char * const argv[])
 {
     apr_getopt_t *opt;
@@ -7655,7 +7953,17 @@ int main(int argc, const char * const argv[])
     int address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
     int address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
 
+    const char *systemd_parameter = DEVICE_SYSTEMD_PARAMETER_DEFAULT;
+    const char *systemd_prefix = NULL;
+    const char *systemd_name = NULL;
+    const char *systemd_suffix = NULL;
+    const char *systemd_unit = NULL;
+
+    int dbus_needed = 0;
+
+    apr_array_header_t *flags = NULL;
     const char *flag = NULL;
+    const char *flag_desc = NULL;
     const char *show_index = NULL;
     const char *show_flags = NULL;
     const char *show_table = NULL;
@@ -7778,12 +8086,16 @@ int main(int argc, const char * const argv[])
             pair->suffix = DEVICE_INDEX_SUFFIX;
             pair->optional = optional;
             pair->set = DEVICE_IS_DEFAULT;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -7796,12 +8108,16 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -7814,12 +8130,16 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -7832,12 +8152,16 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -7850,12 +8174,16 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -7868,14 +8196,18 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->sl.bases = ds.select_bases;
             pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.select_bases = NULL;
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -7900,14 +8232,18 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->b.min = bytes_min;
             pair->b.max = bytes_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -7938,7 +8274,9 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = ds.symlink_suffix ? ds.symlink_suffix  : DEVICE_NONE_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->s.bases = ds.symlink_bases;
             pair->s.symlink_suffix = ds.symlink_suffix;
@@ -7953,7 +8291,9 @@ int main(int argc, const char * const argv[])
             ds.symlink_suffix_len = 0;
             ds.symlink_context_type = NULL;
             ds.symlink_recursive = 0;
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -7991,14 +8331,18 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_SQL_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->q.min = sqlid_min;
             pair->q.max = sqlid_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8011,14 +8355,18 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->q.min = sqlid_min;
             pair->q.max = sqlid_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8049,14 +8397,18 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_USER_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->u.groups = ds.user_groups;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.user_groups = NULL;
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8081,12 +8433,16 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_DISTINGUISHED_NAME_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8099,7 +8455,9 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_DIR_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->r.bases = ds.relation_bases;
             pair->r.relation_name = ds.relation_name;
@@ -8112,7 +8470,9 @@ int main(int argc, const char * const argv[])
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.relation_bases = NULL;
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8147,13 +8507,17 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_ENABLED_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->p.polar_default = polar_default;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8182,13 +8546,17 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_ENABLED_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->sw.switch_default = switch_default;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8217,14 +8585,18 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->i.min = integer_min;
             pair->i.max = integer_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8255,7 +8627,9 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->h.min = hex_min;
             pair->h.max = hex_max;
@@ -8264,7 +8638,9 @@ int main(int argc, const char * const argv[])
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8332,7 +8708,9 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->t.format = text_format;
             pair->t.min = text_min;
@@ -8340,7 +8718,9 @@ int main(int argc, const char * const argv[])
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8377,13 +8757,17 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8396,13 +8780,17 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8415,13 +8803,17 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8434,13 +8826,17 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8453,13 +8849,17 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8472,13 +8872,17 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->up.max = url_path_max;
 
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8500,7 +8904,9 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->uri.schemes = ds.schemes;
             pair->uri.max = uri_max;
@@ -8508,7 +8914,9 @@ int main(int argc, const char * const argv[])
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.schemes = NULL;
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8521,7 +8929,9 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->uri.schemes = ds.schemes;
             pair->uri.max = uri_max;
@@ -8529,7 +8939,9 @@ int main(int argc, const char * const argv[])
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.schemes = NULL;
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8542,7 +8954,9 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->uri.schemes = ds.schemes;
             pair->uri.max = uri_max;
@@ -8550,7 +8964,9 @@ int main(int argc, const char * const argv[])
             apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
 
             ds.schemes = NULL;
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8588,7 +9004,9 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
@@ -8599,7 +9017,9 @@ int main(int argc, const char * const argv[])
             address_max = DEVICE_ADDRESS_MAX_DEFAULT;
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8612,7 +9032,9 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
@@ -8623,7 +9045,9 @@ int main(int argc, const char * const argv[])
             address_max = DEVICE_ADDRESS_MAX_DEFAULT;
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8636,7 +9060,9 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
@@ -8647,7 +9073,9 @@ int main(int argc, const char * const argv[])
             address_max = DEVICE_ADDRESS_MAX_DEFAULT;
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8660,7 +9088,9 @@ int main(int argc, const char * const argv[])
             pair->key = optarg;
             pair->suffix = DEVICE_TXT_SUFFIX;
             pair->optional = optional;
+            pair->flags = flags;
             pair->flag = flag;
+            pair->flag_desc = flag_desc;
             pair->unset = unset;
             pair->a.max = address_max;
             pair->a.noquotes = address_noquotes;
@@ -8671,7 +9101,9 @@ int main(int argc, const char * const argv[])
             address_max = DEVICE_ADDRESS_MAX_DEFAULT;
             address_noquotes = DEVICE_ADDRESS_NOQUOTES_DEFAULT;
             address_filesafe = DEVICE_ADDRESS_FILESAFE_DEFAULT;
+            flags = NULL;
             flag = NULL;
+            flag_desc = NULL;
             unset = NULL;
 
             break;
@@ -8717,9 +9149,135 @@ int main(int argc, const char * const argv[])
 
             break;
         }
+        case DEVICE_SYSTEMD_PARAMETER: {
+
+            systemd_parameter = optarg;
+
+            break;
+        }
+        case DEVICE_SYSTEMD_PREFIX: {
+
+            systemd_prefix = optarg;
+
+            break;
+        }
+        case DEVICE_SYSTEMD_NAME: {
+
+            systemd_name = optarg;
+
+            break;
+        }
+        case DEVICE_SYSTEMD_SUFFIX: {
+
+            systemd_suffix = optarg;
+
+            break;
+        }
+        case DEVICE_SYSTEMD_UNIT: {
+
+            systemd_unit = optarg;
+
+            break;
+        }
+        case DEVICE_SYSTEMD_SERVICE: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_SYSTEMD_SERVICE;
+            pair->key = optarg;
+            pair->suffix = NULL;
+            pair->optional = optional;
+            pair->flags = flags;
+            pair->flag = flag;
+            pair->flag_desc = flag_desc;
+            pair->unset = unset;
+            pair->sd.parameter = systemd_parameter;
+            pair->sd.prefix = systemd_prefix;
+            pair->sd.name = systemd_name;
+            pair->sd.suffix = systemd_suffix;
+            pair->sd.unit = systemd_unit;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            systemd_parameter = DEVICE_SYSTEMD_PARAMETER_DEFAULT;
+            systemd_prefix = NULL;
+            systemd_name = NULL;
+            systemd_suffix = NULL;
+            systemd_unit = NULL;
+            flags = NULL;
+            flag = NULL;
+            flag_desc = NULL;
+            unset = NULL;
+
+            dbus_needed = 1;
+
+            break;
+        }
+        case DEVICE_SYSTEMD_TARGET: {
+
+            device_pair_t *pair = apr_pcalloc(ds.pool, sizeof(device_pair_t));
+
+            pair->type = DEVICE_PAIR_SYSTEMD_TARGET;
+            pair->key = optarg;
+            pair->suffix = NULL;
+            pair->optional = optional;
+            pair->flags = flags;
+            pair->flag = flag;
+            pair->flag_desc = flag_desc;
+            pair->unset = unset;
+            pair->sd.parameter = systemd_parameter;
+            pair->sd.prefix = systemd_prefix;
+            pair->sd.name = systemd_name;
+            pair->sd.suffix = systemd_suffix;
+            pair->sd.unit = systemd_unit;
+
+            apr_hash_set(ds.pairs, optarg, APR_HASH_KEY_STRING, pair);
+
+            systemd_parameter = DEVICE_SYSTEMD_PARAMETER_DEFAULT;
+            systemd_prefix = NULL;
+            systemd_name = NULL;
+            systemd_suffix = NULL;
+            systemd_unit = NULL;
+            flags = NULL;
+            flag = NULL;
+            flag_desc = NULL;
+            unset = NULL;
+
+            dbus_needed = 1;
+
+            break;
+        }
         case DEVICE_FLAG: {
 
             flag = optarg;
+
+            break;
+        }
+        case DEVICE_FLAG_DESC: {
+
+            flag_desc = optarg;
+
+            break;
+        }
+        case DEVICE_FLAG_MATCH: {
+
+            device_flag_t *match;
+
+            if (!flags) {
+                flags = apr_array_make(ds.pool, 1, sizeof(device_flag_t));
+            }
+
+            match = apr_array_push(flags);
+            match->flag = flag;
+            match->desc = flag_desc;
+            if (regcomp(&match->regex, optarg, REG_NEWLINE)) {
+                apr_file_printf(ds.err, "regex '%s': cannot be parsed.\n",
+                        apr_pescape_echo(ds.pool, optarg, 1));
+                exit(2);
+            }
+
+            flag = NULL;
+            flag_desc = NULL;
 
             break;
         }
@@ -8766,6 +9324,10 @@ int main(int argc, const char * const argv[])
     }
     if (APR_SUCCESS != status && APR_EOF != status) {
         return help(ds.err, argv[0], NULL, EXIT_FAILURE, cmdline_opts);
+    }
+
+    if (dbus_needed) {
+        device_dbus(&ds);
     }
 
     ds.show_table = apr_array_make(ds.pool, 16, sizeof(device_table_t));

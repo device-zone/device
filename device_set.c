@@ -6960,6 +6960,27 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         reply = dbus_connection_send_with_reply_and_block(ds->dbus_conn, msg, -1, &ds->dbus_err);
         dbus_message_unref(msg);
 
+        /* fall back to the Unit interface */
+        if (!reply) {
+
+            iface = "org.freedesktop.systemd1.Unit";
+
+            msg = dbus_message_new_method_call(
+                    "org.freedesktop.systemd1",
+                    unit_path,
+                    "org.freedesktop.DBus.Properties",
+                    "Get");
+
+            dbus_message_append_args(
+                    msg,
+                    DBUS_TYPE_STRING, &iface,
+                    DBUS_TYPE_STRING, &pair->sd.parameter,
+                    DBUS_TYPE_INVALID);
+
+            reply = dbus_connection_send_with_reply_and_block(ds->dbus_conn, msg, -1, &ds->dbus_err);
+            dbus_message_unref(msg);
+        }
+
         if (!reply) {
 #if 0
             apr_file_printf(ds->err, "dbus systemd Get no reply '%s': %s\n",

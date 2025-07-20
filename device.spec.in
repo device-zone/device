@@ -10,6 +10,7 @@ Source:    https://github.com/minfrin/%{name}/releases/download/%{name}-%{versio
 URL:       https://github.com/minfrin/%{name}
 Requires(pre): shadow-utils
 BuildRequires: gcc, autoconf, automake, libtool, replxx-devel, libselinux-devel, apr-devel, apr-util-devel
+BuildRequires: pkgconfig(dbus-1)
 Recommends: bash-completion
 
 %define    __libtoolize /bin/true
@@ -22,7 +23,7 @@ from the command line.
 %setup -q
 rm -rf %{_builddir}/%{name}-%{version}/debian
 %build
-%configure --with-replxx --with-selinux
+%configure --with-replxx --with-selinux --with-dbus
 %make_build
 
 %install

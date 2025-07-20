@@ -6966,6 +6966,8 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         /* fall back to the Unit interface */
         if (!reply) {
 
+            dbus_error_free(&ds->dbus_err);
+
             iface = "org.freedesktop.systemd1.Unit";
 
             msg = dbus_message_new_method_call(

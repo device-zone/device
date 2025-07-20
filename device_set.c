@@ -6918,17 +6918,21 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         dbus_message_unref(msg);
 
         if (!reply) {
-            apr_file_printf(ds->err, "dbus systemd '%s': %s\n",
+#if 0
+        	apr_file_printf(ds->err, "dbus systemd '%s': %s\n",
                     pair->key, ds->dbus_err.message);
-            dbus_error_free(&ds->dbus_err);
+#endif
+        	dbus_error_free(&ds->dbus_err);
             status = APR_EGENERAL;
             break;
         }
 
         if (!dbus_message_iter_init(reply, &args) ||
                 DBUS_TYPE_OBJECT_PATH != dbus_message_iter_get_arg_type(&args)) {
-            apr_file_printf(ds->err, "dbus systemd GetUnit did not contain object path '%s'\n",
+#if 0
+            apr_file_printf(ds->err, "dbus systemd dbus_message_iter_init() failed '%s'\n",
                     pair->key);
+#endif
             dbus_message_unref(reply);
             status = APR_EGENERAL;
             break;
@@ -6954,8 +6958,10 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         dbus_message_unref(msg);
 
         if (!reply) {
-            apr_file_printf(ds->err, "dbus systemd GetUnit did not contain object path '%s': %s\n",
+#if 0
+            apr_file_printf(ds->err, "dbus systemd Get no reply '%s': %s\n",
                     pair->key, ds->dbus_err.message);
+#endif
             dbus_error_free(&ds->dbus_err);
             status = APR_EGENERAL;
             break;

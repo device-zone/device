@@ -6474,6 +6474,8 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         APR_FINFO_TYPE, ds->pool);
         if (APR_ENOENT == status) {
 
+        	status = APR_SUCCESS;
+
             value = apr_array_push(values);
             value->pair = pair;
 

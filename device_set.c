@@ -6956,7 +6956,6 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         if (!reply) {
             apr_file_printf(ds->err, "dbus systemd GetUnit did not contain object path '%s': %s\n",
                     pair->key, ds->dbus_err.message);
-            dbus_message_unref(reply);
             dbus_error_free(&ds->dbus_err);
             status = APR_EGENERAL;
             break;

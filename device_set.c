@@ -6375,7 +6375,7 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
     const char *val = NULL;
     apr_off_t len = 0;
 
-    apr_status_t status;
+    apr_status_t status = APR_ENOTIMPL;
 
     switch (pair->type) {
     case DEVICE_PAIR_PORT:
@@ -6847,10 +6847,10 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         switch (pair->type) {
         case DEVICE_PAIR_SYSTEMD_SERVICE:
             suffix = ".service";
-               break;
+            break;
         case DEVICE_PAIR_SYSTEMD_TARGET:
             suffix = ".target";
-               break;
+            break;
         default:
             break;
         }
@@ -6983,6 +6983,7 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         len = strlen(val);
 
         dbus_message_unref(reply);
+
         status = APR_SUCCESS;
 
         value = apr_array_push(values);

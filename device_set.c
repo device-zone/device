@@ -960,7 +960,7 @@ static apr_status_t device_file_read(device_set_t *ds, apr_pool_t *pool,
         const char *key, const char *filename, const char **value,
         apr_off_t *len)
 {
-    apr_file_t *in;
+    apr_file_t *in = NULL;
 
     char *val = NULL;
 

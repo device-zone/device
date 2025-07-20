@@ -6841,6 +6841,8 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         const char *unit = NULL;
         char *unit_path = NULL;
 
+        const char *iface = NULL;
+
         if (!ds->dbus_conn) {
             status = APR_EGENERAL;
             break;
@@ -6849,9 +6851,11 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         switch (pair->type) {
         case DEVICE_PAIR_SYSTEMD_SERVICE:
             suffix = ".service";
+            iface = "org.freedesktop.systemd1.Service";
             break;
         case DEVICE_PAIR_SYSTEMD_TARGET:
             suffix = ".target";
+            iface = "org.freedesktop.systemd1.Target";
             break;
         default:
             break;
@@ -6947,7 +6951,6 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
                 "org.freedesktop.DBus.Properties",
                 "Get");
 
-        const char *iface = "org.freedesktop.systemd1.Unit";
         dbus_message_append_args(
                 msg,
                 DBUS_TYPE_STRING, &iface,

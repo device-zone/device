@@ -6943,6 +6943,9 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         }
 
         dbus_message_iter_get_basic(&args, &unit_path);
+
+        unit_path = apr_pstrdup(ds->pool, unit_path);
+
         dbus_message_unref(reply);
 
         msg = dbus_message_new_method_call(

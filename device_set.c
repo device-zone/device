@@ -7218,7 +7218,7 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
                     }
                 }
             }
-            if (table->pair->flag) {
+            else if (table->pair->flag) {
                 apr_file_printf(ds->out, "%*s", (int)strlen(table->pair->flag), "");
             } else {
                 apr_file_puts(" ", ds->out);

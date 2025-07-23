@@ -68,8 +68,8 @@
 #if HAVE_DBUS_DBUS_H
 #include <dbus/dbus.h>
 #endif
-#if HAVE_UNICODE_UBRK_H
-#include <unicode/ubrk.h>
+#if HAVE_UNICODE_UCHAR_H
+#include <unicode/uchar.h>
 #endif
 #if HAVE_UNICODE_UCNV_H
 #include <unicode/ucnv.h>
@@ -689,15 +689,12 @@ static int abortfunc(int retcode)
 
 static apr_status_t device_utf8len(device_set_t *ds, const char *buff, apr_size_t len, apr_size_t *count)
 {
-#if HAVE_UNICODE_UBRK_H
+#if HAVE_UNICODE_UCHAR_H
     UConverter *icu_converter;
-    UBreakIterator *bi;
     UErrorCode status = U_ZERO_ERROR;
 
     UChar *ubuf;
-    int32_t ulen;
-
-    uint32_t p = 0;
+    int32_t ulen, i;
 
     apr_size_t c = 0;
 
@@ -728,20 +725,43 @@ static apr_status_t device_utf8len(device_set_t *ds, const char *buff, apr_size_
         return APR_EINVAL;
     }
 
-    status = U_ZERO_ERROR;
+    for (i = 0; i < ulen; i++) {
 
-    bi = ubrk_open(UBRK_CHARACTER, "", ubuf, ulen, &status);
+        const int zwm = U_GC_CC_MASK |  /* C0/C1 control code */
+                        U_GC_CF_MASK |  /* Format control character */
+                        U_GC_ME_MASK |  /* Enclosing mark */
+                        U_GC_MN_MASK;   /* Nonspacing mark */
 
-    if (U_FAILURE(status)) {
-        fprintf(stderr, "Could not open UTF8 iterator: %s\n", u_errorName(status));
-        return APR_EGENERAL;
+        const int eaw = u_getIntPropertyValue(ubuf[i],
+                                              UCHAR_EAST_ASIAN_WIDTH);
+
+        switch (eaw) {
+        case U_EA_FULLWIDTH:
+        case U_EA_WIDE:
+            c += 2;
+            break;
+        case U_EA_AMBIGUOUS:
+            /* See: http://www.unicode.org/reports/tr11/#Ambiguous */
+            c += 2;
+            break;
+        case U_EA_NEUTRAL:
+            if (u_hasBinaryProperty(ubuf[i], UCHAR_EMOJI_PRESENTATION)) {
+                c += 2;
+                break;
+            }
+            /* Fall through */
+        case U_EA_HALFWIDTH:
+        case U_EA_NARROW:
+        default:
+            if (ubuf[i] != 0x00AD &&  /* SOFT HYPHEN is Cf but not zero-width */
+                ((U_MASK(u_charType(ubuf[i])) & zwm) ||
+                u_hasBinaryProperty(ubuf[i], UCHAR_EMOJI_MODIFIER))) {
+                break;
+            }
+            c++;
+        }
+
     }
-
-    for (p = ubrk_first(bi); p != UBRK_DONE; p = ubrk_next(bi)) {
-        c++;
-    }
-
-    ubrk_close(bi);
 
     *count = c;
 

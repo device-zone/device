@@ -114,7 +114,7 @@ AC_TYPE_SSIZE_T
 AC_TYPE_UINT32_T
 
 # Checks for headers
-AC_CHECK_HEADERS([unistd.h libgen.h termios.h grp.h pwd.h locale.h langinfo.h iconv.h selinux/selinux.h dbus/dbus.h unicode/ubrk.h unicode/ucnv.h])
+AC_CHECK_HEADERS([unistd.h libgen.h termios.h grp.h pwd.h locale.h langinfo.h iconv.h selinux/selinux.h dbus/dbus.h unicode/uchar.h unicode/ucnv.h])
 
 # Checks for library functions.
 AC_FUNC_MALLOC

@@ -7375,7 +7375,14 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
 
                     if (!regexec(&flag->regex, value->value, 0, NULL, 0)) {
                         if (flag->flag) {
-                            apr_file_printf(ds->out, "%*s", (int)strlen(flag->flag),
+                            apr_size_t utf8len = 0;
+
+                            status = device_utf8len(ds, flag->flag, strlen(flag->flag), &utf8len);
+                            if (APR_SUCCESS != status) {
+                                return status;
+                            }
+
+                            apr_file_printf(ds->out, "%*s", (int)utf8len,
                                     flag->flag);
                         }
                         else {
@@ -7384,7 +7391,14 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
                     }
                     else {
                         if (flag->flag) {
-                            apr_file_printf(ds->out, "%*s", (int)strlen(flag->flag), "");
+                            apr_size_t utf8len = 0;
+
+                            status = device_utf8len(ds, flag->flag, strlen(flag->flag), &utf8len);
+                            if (APR_SUCCESS != status) {
+                                return status;
+                            }
+
+                            apr_file_printf(ds->out, "%*s", (int)utf8len, "");
                         }
                         else {
                             apr_file_puts(" ", ds->out);
@@ -7394,7 +7408,14 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
             }
             else if (value->set) {
                 if (table->pair->flag) {
-                    apr_file_printf(ds->out, "%*s", (int)strlen(table->pair->flag),
+                    apr_size_t utf8len = 0;
+
+                    status = device_utf8len(ds, table->pair->flag, strlen(table->pair->flag), &utf8len);
+                    if (APR_SUCCESS != status) {
+                        return status;
+                    }
+
+                    apr_file_printf(ds->out, "%*s", (int)utf8len,
                             table->pair->flag);
                 } else {
                     apr_file_puts(".", ds->out);
@@ -7402,7 +7423,14 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
             }
             else {
                 if (table->pair->flag) {
-                    apr_file_printf(ds->out, "%*s", (int)strlen(table->pair->flag),
+                    apr_size_t utf8len = 0;
+
+                    status = device_utf8len(ds, table->pair->flag, strlen(table->pair->flag), &utf8len);
+                    if (APR_SUCCESS != status) {
+                        return status;
+                    }
+
+                    apr_file_printf(ds->out, "%*s", (int)utf8len,
                             "");
                 } else {
                     apr_file_puts(" ", ds->out);

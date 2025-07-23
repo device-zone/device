@@ -70,7 +70,7 @@ AC_ARG_WITH(dbus,[  --with-dbus      use dbus library],
     fi
   ])
 
-AC_ARG_WITH(dbus,[  --with-icu       use icu library],
+AC_ARG_WITH(icu,[  --with-icu       use icu library],
   [
     if test "$with_icu" != "no"; then
       PKG_CHECK_MODULES(icu, icu-uc,,[

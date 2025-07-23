@@ -68,6 +68,12 @@
 #if HAVE_DBUS_DBUS_H
 #include <dbus/dbus.h>
 #endif
+#if HAVE_UNICODE_UBRK_H
+#include <unicode/ubrk.h>
+#endif
+#if HAVE_UNICODE_UCNV_H
+#include <unicode/ucnv.h>
+#endif
 #include <regex.h>
 
 #define DEVICE_OPTIONAL 257
@@ -679,6 +685,72 @@ static int abortfunc(int retcode)
     fprintf(stderr, "Out of memory.\n");
 
     return retcode;
+}
+
+static apr_status_t device_utf8len(device_set_t *ds, const char *buff, apr_size_t len, apr_size_t *count)
+{
+#if HAVE_UNICODE_UBRK_H
+    UConverter *icu_converter;
+    UBreakIterator *bi;
+    UErrorCode status = U_ZERO_ERROR;
+
+    UChar *ubuf;
+    int32_t ulen;
+
+    uint32_t p = 0;
+
+    apr_size_t c = 0;
+
+    icu_converter = ucnv_open("utf8", &status);
+    if (U_FAILURE(status)) {
+        fprintf(stderr, "Could not open UTF8 converter: %s\n", u_errorName(status));
+        return APR_EGENERAL;
+    }
+
+    ulen = ucnv_toUChars(icu_converter, NULL, 0, buff, len, &status);
+
+    if (U_FAILURE(status) && status != U_BUFFER_OVERFLOW_ERROR) {
+        fprintf(stderr, "Could not parse UTF8 string: %s\n", u_errorName(status));
+        ucnv_close(icu_converter);
+        return APR_EINVAL;
+    }
+
+    ubuf = apr_palloc(ds->pool, (ulen + 1) * sizeof(*ubuf));
+
+    status = U_ZERO_ERROR;
+
+    ulen = ucnv_toUChars(icu_converter, ubuf, ulen + 1, buff, len, &status);
+
+    ucnv_close(icu_converter);
+
+    if (U_FAILURE(status)) {
+        fprintf(stderr, "Could not parse UTF8 string: %s\n", u_errorName(status));
+        return APR_EINVAL;
+    }
+
+    status = U_ZERO_ERROR;
+
+    bi = ubrk_open(UBRK_CHARACTER, "", ubuf, ulen, &status);
+
+    if (U_FAILURE(status)) {
+        fprintf(stderr, "Could not open UTF8 iterator: %s\n", u_errorName(status));
+        return APR_EGENERAL;
+    }
+
+    for (p = ubrk_first(bi); p != UBRK_DONE; p = ubrk_next(bi)) {
+        c++;
+    }
+
+    ubrk_close(bi);
+
+    *count = c;
+
+    return APR_SUCCESS;
+#else
+    *count = len;
+
+    return APR_SUCCESS;
+#endif
 }
 
 static void device_error_possibles(device_set_t *ds, const char *arg, apr_array_header_t *possibles)
@@ -6474,7 +6546,7 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
         APR_FINFO_TYPE, ds->pool);
         if (APR_ENOENT == status) {
 
-        	status = APR_SUCCESS;
+            status = APR_SUCCESS;
 
             value = apr_array_push(values);
             value->pair = pair;
@@ -6923,10 +6995,10 @@ static apr_status_t device_value(device_set_t *ds, device_pair_t *pair,
 
         if (!reply) {
 #if 0
-        	apr_file_printf(ds->err, "dbus systemd '%s': %s\n",
+            apr_file_printf(ds->err, "dbus systemd '%s': %s\n",
                     pair->key, ds->dbus_err.message);
 #endif
-        	dbus_error_free(&ds->dbus_err);
+            dbus_error_free(&ds->dbus_err);
             status = APR_EGENERAL;
             break;
         }
@@ -7211,7 +7283,14 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
                     device_flag_t *flag = &APR_ARRAY_IDX(table->pair->flags, k, device_flag_t);
 
                     if (flag->flag) {
-                        apr_file_printf(ds->out, "%*s", (int)strlen(flag->flag), "");
+                        apr_size_t utf8len = 0;
+
+                        status = device_utf8len(ds, flag->flag, strlen(flag->flag), &utf8len);
+                        if (APR_SUCCESS != status) {
+                            return status;
+                        }
+
+                        apr_file_printf(ds->out, "%*s", (int)utf8len, "");
                     }
                     else {
                         apr_file_puts(" ", ds->out);
@@ -7219,7 +7298,14 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
                 }
             }
             else if (table->pair->flag) {
-                apr_file_printf(ds->out, "%*s", (int)strlen(table->pair->flag), "");
+                apr_size_t utf8len = 0;
+
+                status = device_utf8len(ds, table->pair->flag, strlen(table->pair->flag), &utf8len);
+                if (APR_SUCCESS != status) {
+                    return status;
+                }
+
+                apr_file_printf(ds->out, "%*s", (int)utf8len, "");
             } else {
                 apr_file_puts(" ", ds->out);
             }

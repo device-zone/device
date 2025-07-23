@@ -70,6 +70,15 @@ AC_ARG_WITH(dbus,[  --with-dbus      use dbus library],
     fi
   ])
 
+AC_ARG_WITH(dbus,[  --with-icu       use icu library],
+  [
+    if test "$with_icu" != "no"; then
+      PKG_CHECK_MODULES(icu, icu-uc,,[
+        AC_CHECK_LIB(icu,ubrk_open)
+      ])
+    fi
+  ])
+
 AC_ARG_WITH([bash-completion-dir],
     AS_HELP_STRING([--with-bash-completion-dir[=PATH]],
         [Install the bash auto-completion script in this directory. @<:@default=yes@:>@]),
@@ -91,10 +100,10 @@ AM_CONDITIONAL([ENABLE_BASH_COMPLETION],[test "x$with_bash_completion_dir" != "x
 PKG_CHECK_MODULES(apr, apr-1 >= 1.3)
 PKG_CHECK_MODULES(apu, apr-util-1 >= 1.3)
 
-CFLAGS="$CFLAGS $apr_CFLAGS $apu_CFLAGS $libedit_CFLAGS $libselinux_CFLAGS $dbus_CFLAGS"
-CPPFLAGS="$CPPFLAGS $apr_CPPFLAGS $apu_CPPFLAGS $libedit_CPPFLAGS $libselinux_CPPFLAGS $dbus_CPPFLAGS"
-LDFLAGS="$LDFLAGS $apr_LDFLAGS $apu_LDFLAGS $libedit_LDFLAGS $libselinux_LDFLAGS $dbus_LDFLAGS"
-LIBS="$LIBS $apr_LIBS $apu_LIBS $libedit_LIBS $libselinux_LIBS $dbus_LIBS"
+CFLAGS="$CFLAGS $apr_CFLAGS $apu_CFLAGS $libedit_CFLAGS $libselinux_CFLAGS $dbus_CFLAGS $icu_CFLAGS"
+CPPFLAGS="$CPPFLAGS $apr_CPPFLAGS $apu_CPPFLAGS $libedit_CPPFLAGS $libselinux_CPPFLAGS $dbus_CPPFLAGS $icu_CPPFLAGS"
+LDFLAGS="$LDFLAGS $apr_LDFLAGS $apu_LDFLAGS $libedit_LDFLAGS $libselinux_LDFLAGS $dbus_LDFLAGS $icu_LDFLAGS"
+LIBS="$LIBS $apr_LIBS $apu_LIBS $libedit_LIBS $libselinux_LIBS $dbus_LIBS $icu_LIBS"
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_HEADER_STDBOOL
@@ -105,7 +114,7 @@ AC_TYPE_SSIZE_T
 AC_TYPE_UINT32_T
 
 # Checks for headers
-AC_CHECK_HEADERS([unistd.h libgen.h termios.h grp.h pwd.h locale.h langinfo.h iconv.h selinux/selinux.h dbus/dbus.h])
+AC_CHECK_HEADERS([unistd.h libgen.h termios.h grp.h pwd.h locale.h langinfo.h iconv.h selinux/selinux.h dbus/dbus.h unicode/ubrk.h unicode/ucnv.h])
 
 # Checks for library functions.
 AC_FUNC_MALLOC

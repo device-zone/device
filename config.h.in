@@ -1,5 +1,8 @@
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
+/* Define to 1 if you have the <dbus/dbus.h> header file. */
+#undef HAVE_DBUS_DBUS_H
+
 /* Define to 1 if you have the <dlfcn.h> header file. */
 #undef HAVE_DLFCN_H
 
@@ -21,19 +24,25 @@
 /* Define to 1 if you have the <langinfo.h> header file. */
 #undef HAVE_LANGINFO_H
 
-/* Define to 1 if you have the `edit' library (-ledit). */
+/* Define to 1 if you have the 'dbus' library (-ldbus). */
+#undef HAVE_LIBDBUS
+
+/* Define to 1 if you have the 'edit' library (-ledit). */
 #undef HAVE_LIBEDIT
 
-/* Define to 1 if you have the `editline' library (-leditline). */
+/* Define to 1 if you have the 'editline' library (-leditline). */
 #undef HAVE_LIBEDITLINE
 
 /* Define to 1 if you have the <libgen.h> header file. */
 #undef HAVE_LIBGEN_H
 
-/* Define to 1 if you have the `replxx' library (-lreplxx). */
+/* Define to 1 if you have the 'icu' library (-licu). */
+#undef HAVE_LIBICU
+
+/* Define to 1 if you have the 'replxx' library (-lreplxx). */
 #undef HAVE_LIBREPLXX
 
-/* Define to 1 if you have the `selinux' library (-lselinux). */
+/* Define to 1 if you have the 'selinux' library (-lselinux). */
 #undef HAVE_LIBSELINUX
 
 /* Have the linenoise header files */
@@ -42,14 +51,14 @@
 /* Define to 1 if you have the <locale.h> header file. */
 #undef HAVE_LOCALE_H
 
-/* Define to 1 if your system has a GNU libc compatible `malloc' function, and
+/* Define to 1 if your system has a GNU libc compatible 'malloc' function, and
    to 0 otherwise. */
 #undef HAVE_MALLOC
 
 /* Define to 1 if you have the <pwd.h> header file. */
 #undef HAVE_PWD_H
 
-/* Define to 1 if you have the `replxx_add_color_completion' function. */
+/* Define to 1 if you have the 'replxx_add_color_completion' function. */
 #undef HAVE_REPLXX_ADD_COLOR_COMPLETION
 
 /* Define to 1 if you have the <replxx.h> header file. */
@@ -82,16 +91,22 @@
 /* Define to 1 if you have the <sys/types.h> header file. */
 #undef HAVE_SYS_TYPES_H
 
-/* Define to 1 if you have the `tcgetattr' function. */
+/* Define to 1 if you have the 'tcgetattr' function. */
 #undef HAVE_TCGETATTR
 
 /* Define to 1 if you have the <termios.h> header file. */
 #undef HAVE_TERMIOS_H
 
+/* Define to 1 if you have the <unicode/uchar.h> header file. */
+#undef HAVE_UNICODE_UCHAR_H
+
+/* Define to 1 if you have the <unicode/ucnv.h> header file. */
+#undef HAVE_UNICODE_UCNV_H
+
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
 
-/* Define to 1 if the system has the type `_Bool'. */
+/* Define to 1 if the system has the type '_Bool'. */
 #undef HAVE__BOOL
 
 /* Define to the sub-directory where libtool stores uninstalled libraries. */
@@ -118,7 +133,7 @@
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
-/* Define to 1 if all of the C90 standard headers exist (not just the ones
+/* Define to 1 if all of the C89 standard headers exist (not just the ones
    required in a freestanding environment). This macro is provided for
    backward compatibility; new code need not use it. */
 #undef STDC_HEADERS
@@ -131,7 +146,7 @@
    #define below would cause a syntax error. */
 #undef _UINT32_T
 
-/* Define to `__inline__' or `__inline' if that's what the C compiler
+/* Define to '__inline__' or '__inline' if that's what the C compiler
    calls it, or to nothing if 'inline' is not supported under any name.  */
 #ifndef __cplusplus
 #undef inline
@@ -143,10 +158,10 @@
 /* Define as a signed integer type capable of holding a process identifier. */
 #undef pid_t
 
-/* Define to `unsigned int' if <sys/types.h> does not define. */
+/* Define as 'unsigned int' if <stddef.h> doesn't define. */
 #undef size_t
 
-/* Define to `int' if <sys/types.h> does not define. */
+/* Define as 'int' if <sys/types.h> doesn't define. */
 #undef ssize_t
 
 /* Define to the type of an unsigned integer type of width exactly 32 bits if

@@ -46,6 +46,6 @@ getent group device >/dev/null || groupadd -r device
 %license COPYING
 
 %changelog
-* Mon Apr 05 2021 Graham Leggett <minfrin@sharp.fm> 0.9.0-1
+* Sun Sep 07 2025 Graham Leggett <minfrin@sharp.fm> 1.0.0-1
 - Initial release
 

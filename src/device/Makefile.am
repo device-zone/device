@@ -1,4 +1,7 @@
 
+ACLOCAL_AMFLAGS = -I m4
+AM_CPPFLAGS = -DPKGSYSCONFDIR='"$(sysconfdir)/$(PACKAGE_NAME)"' -DPKGLIBEXECDIR='"$(pkglibexecdir)"'
+
 bin_PROGRAMS = device
 device_SOURCES = device.c device.h \
 	device_argv.c device_argv.h \

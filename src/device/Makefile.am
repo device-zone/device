@@ -11,7 +11,6 @@ device_SOURCES = device.c device.h \
 	device_util.h device_util.c \
 	linenoise.c linenoise.h
 
-EXTRA_DIST = device.spec
 dist_man_MANS = device.1
 
 device.1: device.c $(top_srcdir)/configure.ac

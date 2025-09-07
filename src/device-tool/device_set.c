@@ -58,7 +58,7 @@
 #if HAVE_ICONV_H
 #include <iconv.h>
 #endif
-#if HAVE_SELINUX_SELINUX_H
+#if HAVE_SELINUX
 #include <selinux/selinux.h>
 #include <selinux/context.h>
 #endif
@@ -534,7 +534,7 @@ static const apr_getopt_option_t
     { "bytes", DEVICE_BYTES, 1, "  --bytes=name\t\t\tParse a positive integer containing bytes.\n\t\t\t\tOptional modifiers like B, kB, KiB, MB, MiB,\n\t\t\t\tGB, GiB, TB, TiB, PB, PiB, EB, EiB are accepted,\n\t\t\t\tand the given string is expanded into a byte\n\t\t\t\tvalue. Modifiers outside of the specified byte\n\t\t\t\trange are ignored." },
     { "symlink-base", DEVICE_SYMLINK_BASE, 1, "  --symlink-base=path\t\tBase path containing targets for symbolic links.\n\t\t\t\tMore than one path can be specified. In the case\n\t\t\t\tof collision, the earliest match wins." },
     { "symlink-suffix", DEVICE_SYMLINK_SUFFIX, 1, "  --symlink-suffix=suffix\tLimit targets for symbolic links to this suffix." },
-#if HAVE_SELINUX_SELINUX_H
+#if HAVE_SELINUX
     { "symlink-context-type", DEVICE_SYMLINK_CONTEXT_TYPE, 1, "  --symlink-context-type=type\tLimit targets for symbolic links to this SELinux\n\t\t\t\tcontext type." },
 #endif
 #if 0
@@ -2098,7 +2098,7 @@ static apr_status_t device_parse_symlink(device_set_t *ds, device_pair_t *pair,
                     continue;
                 }
 
-#if HAVE_SELINUX_SELINUX_H
+#if HAVE_SELINUX
                 /* check selinux context */
                 if (pair->s.symlink_context_type) {
                     char *raw = NULL;

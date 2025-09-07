@@ -5264,6 +5264,8 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
 {
     apr_file_t *out;
 
+    char ustr[APR_UUID_FORMATTED_LENGTH + 1];
+
     char *pwd;
     const char *keypath = NULL, *keyval = NULL;
     apr_status_t status = APR_SUCCESS;
@@ -5283,7 +5285,6 @@ static apr_status_t device_files(device_set_t *ds, apr_array_header_t *files)
         if (ds->key) {
 
             apr_uuid_t uuid;
-            char ustr[APR_UUID_FORMATTED_LENGTH + 1];
 
             /* test for uniqueness */
 

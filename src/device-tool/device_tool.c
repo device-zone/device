@@ -16,7 +16,7 @@
  */
 
 /*
- * device-set - helper to set name value pairs
+ * device-tool - helper to set name value pairs with sanity check
  *
  */
 
@@ -658,17 +658,17 @@ static int help(apr_file_t *out, const char *name, const char *msg, int code,
             "  the value '22'. These values will be saved to files in the current\n"
             "  directory named 'host.txt' and 'port.txt' respectively.\n"
             "\n"
-            "\t~$ device-set --hostname host --port port -- host localhost port 22\n"
+            "\t~$ %s --hostname host --port port -- host localhost port 22\n"
             "\n"
             "  Here we perform command line completion on the given option. Note that\n"
             "  the option passed is empty, and thus matches both possible options.\n"
             "\n"
-            "\t~$ device-set --hostname host --port port -c ''\n"
+            "\t~$ %s --hostname host --port port -c ''\n"
             "\thost\n"
             "\tport\n"
             "\n"
             "AUTHOR\n"
-            "  Graham Leggett <minfrin@sharp.fm>\n");
+            "  Graham Leggett <minfrin@sharp.fm>\n", n, n);
 
     return code;
 }

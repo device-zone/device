@@ -40,6 +40,7 @@ getent group device >/dev/null || groupadd -r device
 %{_mandir}/man8/device-*.8*
 %attr(2775,root,device) %{_sysconfdir}/device
 %attr(0775,root,root) %{_libexecdir}/device
+%attr(0775,root,root) %{_libexecdir}/device/state
 %{_datadir}/bash-completion/completions/device
 
 %doc AUTHORS ChangeLog README

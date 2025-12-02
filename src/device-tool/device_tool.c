@@ -6300,11 +6300,48 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
     return status;
 }
 
+static apr_status_t device_lock(device_set_t *ds, int type)
+{
+    char *pwd;
+    apr_file_t *lock;
+    apr_status_t status;
+
+    status = apr_filepath_get(&pwd, APR_FILEPATH_NATIVE, ds->pool);
+
+    if (APR_SUCCESS != status) {
+        apr_file_printf(ds->err, "could not get current directory: %pm\n", &status);
+        return status;
+    }
+
+    status = apr_file_open(&lock, pwd, APR_FOPEN_READ,
+                           APR_FPROT_OS_DEFAULT, ds->pool);
+
+    if (APR_SUCCESS != status) {
+        apr_file_printf(ds->err, "could not open current directory: %pm\n", &status);
+        return status;
+    }
+
+    status = apr_file_lock(lock, type);
+
+    if (APR_SUCCESS != status) {
+        apr_file_printf(ds->err, "could not obtain lock: %pm\n", &status);
+        return status;
+    }
+
+    return APR_SUCCESS;
+}
+
 static apr_status_t device_add(device_set_t *ds, const char **args)
 {
     const char *key = NULL, *val = NULL;
     apr_status_t status = APR_SUCCESS;
     int len;
+
+    status = device_lock(ds, APR_FLOCK_EXCLUSIVE);
+
+    if (APR_SUCCESS != status) {
+        return status;
+    }
 
     for (len = 0; args && args[len]; len++);
 
@@ -6381,6 +6418,12 @@ static apr_status_t device_set(device_set_t *ds, const char **args)
     const char *key = NULL, *val = NULL;
     apr_status_t status = APR_SUCCESS;
     int len;
+
+    status = device_lock(ds, APR_FLOCK_EXCLUSIVE);
+
+    if (APR_SUCCESS != status) {
+        return status;
+    }
 
     for (len = 0; args && args[len]; len++);
 
@@ -7156,6 +7199,12 @@ static apr_status_t device_list(device_set_t *ds, const char **args)
 
     int i, j, k;
 
+    status = device_lock(ds, APR_FLOCK_SHARED);
+
+    if (APR_SUCCESS != status) {
+        return status;
+    }
+
     if (!ds->show_table) {
         apr_file_printf(ds->err, "Name to show was not specified.\n");
         return APR_EINVAL;
@@ -7472,6 +7521,12 @@ static apr_status_t device_show(device_set_t *ds, const char **args)
 
     int i, max;
 
+    status = device_lock(ds, APR_FLOCK_SHARED);
+
+    if (APR_SUCCESS != status) {
+        return status;
+    }
+
     if (ds->key) {
 
         if (!args[0] || !args[1]) {
@@ -7542,6 +7597,12 @@ static apr_status_t device_remove(device_set_t *ds, const char **args)
     apr_status_t status = APR_SUCCESS;
 
     apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
+
+    status = device_lock(ds, APR_FLOCK_EXCLUSIVE);
+
+    if (APR_SUCCESS != status) {
+        return status;
+    }
 
     if (!args[0]) {
         apr_file_printf(ds->err, "%s is required.\n", ds->key);
@@ -7724,6 +7785,12 @@ static apr_status_t device_mark(device_set_t *ds, const char **args)
 
     apr_array_header_t *options = apr_array_make(ds->pool, 10, sizeof(char *));
 
+    status = device_lock(ds, APR_FLOCK_EXCLUSIVE);
+
+    if (APR_SUCCESS != status) {
+        return status;
+    }
+
     if (!args[0]) {
         apr_file_printf(ds->err, "%s is required.\n", ds->key);
         return status;
@@ -7774,6 +7841,12 @@ static apr_status_t device_reindex(device_set_t *ds, const char **args)
             16, sizeof(device_file_t));
 
     apr_status_t status = APR_SUCCESS;
+
+    status = device_lock(ds, APR_FLOCK_EXCLUSIVE);
+
+    if (APR_SUCCESS != status) {
+        return status;
+    }
 
     for (hi = apr_hash_first(ds->pool, ds->pairs); hi; hi = apr_hash_next(hi)) {
 
@@ -8006,6 +8079,12 @@ static apr_status_t device_exec(device_set_t *ds, const char **args)
     for (len = 0; args && args[len]; len++);
 
     apr_array_header_t *files = apr_array_make(ds->pool, len, sizeof(device_file_t));
+
+    status = device_lock(ds, APR_FLOCK_SHARED);
+
+    if (APR_SUCCESS != status) {
+        return status;
+    }
 
     if (ds->key) {
 

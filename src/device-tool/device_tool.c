@@ -27,6 +27,7 @@
 #include <apr_getopt.h>
 #include <apr_lib.h>
 #include <apr_hash.h>
+#include <apr_portable.h>
 #include <apr_strings.h>
 #include <apr_thread_proc.h>
 #include <apr_uri.h>
@@ -75,6 +76,8 @@
 #include <unicode/ucnv.h>
 #endif
 #include <regex.h>
+
+#include <sys/file.h>
 
 #define DEVICE_OPTIONAL 257
 #define DEVICE_REQUIRED 258
@@ -6300,11 +6303,24 @@ static apr_status_t device_parse(device_set_t *ds, const char *key, const char *
     return status;
 }
 
+static apr_status_t cleanup_lock(void *dummy)
+{
+    apr_file_t *lock = dummy;
+    apr_os_file_t fd;
+
+    apr_os_file_get(&fd, lock);
+
+    flock(fd, LOCK_UN);
+
+    return APR_SUCCESS;
+}
+
 static apr_status_t device_lock(device_set_t *ds, int type)
 {
     char *pwd;
     apr_file_t *lock;
     apr_status_t status;
+    apr_os_file_t fd;
 
     status = apr_filepath_get(&pwd, APR_FILEPATH_NATIVE, ds->pool);
 
@@ -6321,12 +6337,19 @@ static apr_status_t device_lock(device_set_t *ds, int type)
         return status;
     }
 
-    status = apr_file_lock(lock, type);
+    apr_os_file_get(&fd, lock);
+
+    flock(fd, type == APR_FLOCK_EXCLUSIVE ? LOCK_EX : LOCK_SH);
+
+    status = APR_FROM_OS_ERROR(errno);
 
     if (APR_SUCCESS != status) {
         apr_file_printf(ds->err, "could not obtain lock: %pm\n", &status);
         return status;
     }
+
+    apr_pool_cleanup_register(ds->pool, lock, cleanup_lock,
+            apr_pool_cleanup_null);
 
     return APR_SUCCESS;
 }

@@ -166,9 +166,9 @@
 #define DEVICE_ENABLED_SUFFIX ".bin"
 #define DEVICE_NONE_SUFFIX ""
 
-#define DEVICE_ADD_MARKER "added"
-#define DEVICE_SET_MARKER "updated"
-#define DEVICE_REMOVE_MARKER "removed"
+#define DEVICE_ADD_MARKER ".added"
+#define DEVICE_SET_MARKER ".updated"
+#define DEVICE_REMOVE_MARKER ".removed"
 
 typedef enum device_mode_e {
     DEVICE_SET,

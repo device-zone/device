@@ -2461,12 +2461,12 @@ int main(int argc, const char * const argv[])
     }
 
     if (!libexec) {
-        libexec = PKGLIBEXECDIR;
+        libexec = DEFAULT_PKGLIBEXECDIR;
     }
     d.libexec = libexec;
 
     if (!sysconf) {
-        sysconf = PKGSYSCONFDIR;
+        sysconf = DEFAULT_PKGSYSCONFDIR;
     }
     d.sysconf = sysconf;
 

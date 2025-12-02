@@ -19,4 +19,9 @@ dist_man_MANS = device.1
 device.1: device.c $(top_srcdir)/configure.ac
 	which txt2man && ./device --help | txt2man -s 1 -t "${PACKAGE_NAME}" -r "${PACKAGE_NAME}-${PACKAGE_VERSION}" > device.1 || true
 
+install-data-local:
+	$(MKDIR_P) $(DESTDIR)$(pkglibexecdir)/$(PACKAGE_NAME)/state
+
+uninstall-local:
+	rmdir $(DESTDIR)$(pkglibexecdir)/$(PACKAGE_NAME)/state 2>/dev/null || :
 

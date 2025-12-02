@@ -6339,11 +6339,8 @@ static apr_status_t device_lock(device_set_t *ds, int type)
 
     apr_os_file_get(&fd, lock);
 
-    flock(fd, type == APR_FLOCK_EXCLUSIVE ? LOCK_EX : LOCK_SH);
-
-    status = APR_FROM_OS_ERROR(errno);
-
-    if (APR_SUCCESS != status) {
+    if (flock(fd, type == APR_FLOCK_EXCLUSIVE ? LOCK_EX : LOCK_SH)) {
+        status = APR_FROM_OS_ERROR(errno);
         apr_file_printf(ds->err, "could not obtain lock: %pm\n", &status);
         return status;
     }

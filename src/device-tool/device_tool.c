@@ -163,7 +163,8 @@
 #define DEVICE_USER_SUFFIX ".txt"
 #define DEVICE_DISTINGUISHED_NAME_SUFFIX ".txt"
 #define DEVICE_DIR_SUFFIX ".d"
-#define DEVICE_ENABLED_SUFFIX ".bin"
+#define DEVICE_POLAR_SUFFIX ".polar"
+#define DEVICE_SWITCH_SUFFIX ".switch"
 #define DEVICE_NONE_SUFFIX ""
 
 #define DEVICE_ADD_MARKER ".added"
@@ -8677,7 +8678,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_POLAR;
             pair->key = optarg;
-            pair->suffix = DEVICE_ENABLED_SUFFIX;
+            pair->suffix = DEVICE_POLAR_SUFFIX;
             pair->optional = optional;
             pair->flags = flags;
             pair->flag = flag;
@@ -8716,7 +8717,7 @@ int main(int argc, const char * const argv[])
 
             pair->type = DEVICE_PAIR_SWITCH;
             pair->key = optarg;
-            pair->suffix = DEVICE_ENABLED_SUFFIX;
+            pair->suffix = DEVICE_SWITCH_SUFFIX;
             pair->optional = optional;
             pair->flags = flags;
             pair->flag = flag;

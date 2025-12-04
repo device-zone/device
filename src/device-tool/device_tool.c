@@ -197,6 +197,7 @@ typedef struct device_set_t {
     const char *keyval;
     apr_hash_t *pairs;
     const char *path;
+    const char *lock;
     apr_array_header_t *user_groups;
     apr_array_header_t *select_bases;
     apr_array_header_t *symlink_bases;
@@ -504,6 +505,7 @@ static const apr_getopt_option_t
         "  -v, --version\t\t\tDisplay the version number." },
     { "base", 'b', 1, "  -b, --base=path\t\tBase path in which to search for option files." },
     { "complete", 'c', 0, "  -c, --complete\t\tOutput values so the device shell can perform\n\t\t\t\tcommand line completion. Each completion is\n\t\t\t\tprefixed with '-' for optional completions and\n\t\t\t\t'*' for required completions. All non-prefixed\n\t\t\t\tstrings are ignored." },
+    { "lock", 'p', 1, "  -p, --lock=path\t\tPath to lock, which must already exist. Flock\n\t\t\t\tis used across all unix platforms. Show and\n\t\t\t\texec use a shared lock, all updates use an\n\t\t\t\texclusive lock." },
     { "optional", DEVICE_OPTIONAL, 0, "  --optional\t\t\tOptions declared after this are optional. This\n\t\t\t\tis the default." },
     { "required", DEVICE_REQUIRED, 0, "  --required\t\t\tOptions declared after this are required." },
     { "add", 'a', 1, "  -a, --add=name\t\tAdd a new set of options, named by the key\n\t\t\t\tspecified, which becomes required. A file \n\t\t\t\tcalled '" DEVICE_ADD_MARKER "' will be created in the newly\n\t\t\t\tcreated directory to indicate the directory\n\t\t\t\tshould be processed." },
@@ -6317,23 +6319,33 @@ static apr_status_t cleanup_lock(void *dummy)
 
 static apr_status_t device_lock(device_set_t *ds, int type)
 {
-    char *pwd;
+    const char *path;
     apr_file_t *lock;
     apr_status_t status;
     apr_os_file_t fd;
 
-    status = apr_filepath_get(&pwd, APR_FILEPATH_NATIVE, ds->pool);
+    if (!ds->lock) {
 
-    if (APR_SUCCESS != status) {
-        apr_file_printf(ds->err, "could not get current directory: %pm\n", &status);
-        return status;
+        char *pwd;
+
+        status = apr_filepath_get(&pwd, APR_FILEPATH_NATIVE, ds->pool);
+
+        if (APR_SUCCESS != status) {
+            apr_file_printf(ds->err, "could not get current directory: %pm\n", &status);
+            return status;
+        }
+
+        path = pwd;
+    }
+    else {
+        path = ds->lock;
     }
 
-    status = apr_file_open(&lock, pwd, APR_FOPEN_READ,
+    status = apr_file_open(&lock, path, APR_FOPEN_READ,
                            APR_FPROT_OS_DEFAULT, ds->pool);
 
     if (APR_SUCCESS != status) {
-        apr_file_printf(ds->err, "could not open current directory: %pm\n", &status);
+        apr_file_printf(ds->err, "could not open lock: %pm\n", &status);
         return status;
     }
 
@@ -8299,6 +8311,10 @@ int main(int argc, const char * const argv[])
         case 'n': {
             ds.mode = DEVICE_RENAME;
             ds.key = optarg;
+            break;
+        }
+        case 'p': {
+            ds.lock = optarg;
             break;
         }
         case DEVICE_OPTIONAL: {
